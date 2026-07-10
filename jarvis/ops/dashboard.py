@@ -525,17 +525,18 @@ function archSVG(d){
     ${flow("M160 100 L192 100","","e-gw-wm")}
     ${box(192,72,144,56,"Working memory","assembled per turn","memory","","wm")}
 
-    <rect class="loopbox" x="372" y="64" width="164" height="128" rx="12"/>
-    ${lbl(386,56,"LOOP")}
-    ${box(386,76,136,44,"LLM agent","reason","loop","","llm")}
-    ${box(386,132,136,48,"Tools","create_event…","tools","","tools")}
-    ${flow("M446 120 L446 132")}${flow("M468 132 L468 120")}
-    ${flow("M336 100 L372 100","","e-wm-loop")}
-    ${flow("M536 110 L556 110")}${flowLbl(540,104,"reply")}
-    ${box(556,84,104,52,"Reply","→ back to you","loop","","reply")}
-    <!-- reply loops back to the gateway (next turn) -->
-    <path class="flow" id="e-reply-gw" d="M608 84 C608 42 360 42 96 68" marker-end="url(#arr)"/>
-    ${flowLbl(372,38,"next turn")}
+    <rect class="loopbox" x="370" y="56" width="168" height="166" rx="12"/>
+    ${lbl(384,48,"LOOP")}
+    ${box(384,72,140,50,"LLM agent","reason","loop","","llm")}
+    ${box(384,152,140,52,"Tools","create_event…","tools","","tools")}
+    ${flow("M448 122 L448 152")}${flow("M470 152 L470 122")}
+    ${flowLbl(456,141,"act")}
+    ${flow("M336 100 L370 100","","e-wm-loop")}
+    ${flow("M538 100 L558 106")}${flowLbl(542,93,"reply")}
+    ${box(558,84,104,52,"Reply","→ back to you","loop","","reply")}
+    <!-- reply loops back to the gateway (next turn), arced well clear of the loop -->
+    <path class="flow" id="e-reply-gw" d="M610 84 C610 28 360 28 96 66" marker-end="url(#arr)"/>
+    ${flowLbl(376,24,"next turn")}
     <!-- every turn is saved for consolidation: down the right inner lane,
          then left into the consolidation box -->
     <path class="flow dash" id="e-reply-save" d="M652 136 C666 150 666 200 666 600 L648 600" marker-end="url(#arr)"/>
