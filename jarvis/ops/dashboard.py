@@ -209,6 +209,28 @@ def collect() -> dict:
     }
 
 
+def events_since(cursor):
+    """New trace events past `cursor` (a line count in today's trace file).
+    Any gateway — browser, CLI, voice, Telegram — appends to this same file,
+    so the live diagram lights up for all of them. cursor=None returns just
+    the current tail so the browser starts fresh instead of replaying history."""
+    settings = load_settings()
+    settings.ensure_home()
+    path = settings.home / "traces" / (datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+    if not path.exists():
+        return {"events": [], "cursor": 0}
+    lines = path.read_text().splitlines()
+    if cursor is None or cursor < 0 or cursor > len(lines):
+        return {"events": [], "cursor": len(lines)}
+    out = []
+    for ln in lines[cursor:]:
+        try:
+            out.append(json.loads(ln))
+        except json.JSONDecodeError:
+            pass
+    return {"events": out, "cursor": len(lines)}
+
+
 PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Jarvis</title>
@@ -305,6 +327,20 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
   .arch .flow{fill:none;stroke:var(--ink3);stroke-width:1.3;marker-end:url(#arr)}
   .arch .flow.dash{stroke-dasharray:4 3;opacity:.75}
   .arch .head{fill:var(--ink3)}
+  /* live animation: node lights up (fill+stroke) + flowing edge (n8n-style).
+     drop-shadow(var()) is unreliable on SVG, so we light the fill instead. */
+  .arch .bx{transition:stroke .15s ease, fill .15s ease, stroke-width .15s ease}
+  .arch .node.hot .bx{stroke:var(--accent) !important;stroke-width:2.6;fill:var(--accent-soft) !important}
+  .arch .gate{transition:stroke .15s ease, stroke-width .15s ease}
+  .arch .gate.hot{stroke:var(--accent) !important;stroke-width:4}
+  .arch .flow.live{stroke:var(--accent) !important;stroke-width:2.6;opacity:1;stroke-dasharray:6 5;
+                   animation:flowdash .5s linear infinite}
+  @keyframes flowdash{to{stroke-dashoffset:-22}}
+  .arch-status{font-size:11px;font-weight:600;color:var(--accent);text-transform:none;
+               letter-spacing:0;margin-left:10px}
+  .arch-status .live-dot{display:inline-block;width:7px;height:7px;border-radius:99px;
+               background:var(--accent);margin-right:5px;vertical-align:middle;animation:pulse 1s ease-in-out infinite}
+  @media (prefers-reduced-motion:reduce){.arch .flow.live{animation:none}.arch-status .live-dot{animation:none}}
   .chatlog{display:flex;flex-direction:column;gap:10px;margin-bottom:96px}
   .bubble{align-self:flex-end;background:var(--accent);color:#fff;padding:8px 13px;
           border-radius:14px 14px 3px 14px;max-width:75%;font-size:13.5px}
@@ -440,14 +476,14 @@ function scrollChat(){ const l=document.getElementById("chatlog"); if(l) window.
 // air — the detail lives in each tab. Every node is live and clickable.
 function archSVG(d){
   const s = d.stats;
-  const box = (x,y,w,h,title,sub,view,cls="") =>
-    `<g class="node ${cls}" ${view?`onclick="location.hash='${view}'"`:""}>
+  const box = (x,y,w,h,title,sub,view,cls="",nid="") =>
+    `<g class="node ${cls}" ${nid?`id="n-${nid}"`:""} ${view?`onclick="location.hash='${view}'"`:""}>
        <rect class="bx" x="${x}" y="${y}" width="${w}" height="${h}" rx="9"/>
        <text class="nt" x="${x+13}" y="${y+24}">${title}</text>
        ${sub?`<text class="ns" x="${x+13}" y="${y+42}">${sub}</text>`:""}
      </g>`;
   const lbl = (x,y,t) => `<text class="grp" x="${x}" y="${y}">${t}</text>`;
-  const flow = (d2,cls="") => `<path class="flow ${cls}" d="${d2}"/>`;
+  const flow = (d2,cls="",id="") => `<path class="flow ${cls}" ${id?`id="${id}"`:""} d="${d2}"/>`;
   const flowLbl = (x,y,t,anchor="start") => `<text class="fl" x="${x}" y="${y}" text-anchor="${anchor}">${t}</text>`;
 
   return `<div style="overflow-x:auto"><svg viewBox="0 0 960 552" class="arch" role="img">
@@ -459,49 +495,49 @@ function archSVG(d){
     ${lbl(28,46,"HARNESS — one ephemeral turn")}
 
     <!-- the turn: gateway → working memory → loop → reply -->
-    ${box(28,64,120,52,"Gateway","cli · voice · web","chat")}
-    ${flow("M148 90 L176 90")}
-    ${box(176,64,132,52,"Working memory","assembled per turn","memory")}
+    ${box(28,64,120,52,"Gateway","cli · voice · web","chat","","gateway")}
+    ${flow("M148 90 L176 90","","e-gw-wm")}
+    ${box(176,64,132,52,"Working memory","assembled per turn","memory","","wm")}
 
     <rect class="loopbox" x="336" y="58" width="150" height="118" rx="11"/>
     ${lbl(348,50,"LOOP")}
-    ${box(348,68,126,40,"LLM agent","reason","loop")}
-    ${box(348,120,126,44,"Tools","create_event…","tools")}
+    ${box(348,68,126,40,"LLM agent","reason","loop","","llm")}
+    ${box(348,120,126,44,"Tools","create_event…","tools","","tools")}
     ${flow("M401 108 L401 120")}${flow("M421 120 L421 108")}
-    ${flow("M308 90 L336 90")}
+    ${flow("M308 90 L336 90","","e-wm-loop")}
     ${flow("M486 100 L520 100")}${flowLbl(494,94,"reply")}
-    ${box(520,76,104,48,"Reply","→ back to you","loop")}
+    ${box(520,76,104,48,"Reply","→ back to you","loop","","reply")}
     <!-- reply loops back to the gateway (next turn) -->
-    <path class="flow" d="M572 76 C572 40 320 40 88 62" marker-end="url(#arr)"/>
+    <path class="flow" id="e-reply-gw" d="M572 76 C572 40 320 40 88 62" marker-end="url(#arr)"/>
     ${flowLbl(330,36,"next turn")}
     <!-- every turn is saved for consolidation (right inner lane) -->
-    <path class="flow dash" d="M600 118 C620 128 622 150 622 200 L622 402" marker-end="url(#arr)"/>
+    <path class="flow dash" id="e-reply-save" d="M600 118 C620 128 622 150 622 200 L622 402" marker-end="url(#arr)"/>
     ${flowLbl(628,300,"save chats")}
 
     <!-- retrieval gate feeding working memory (the hero) -->
-    <path class="gate" d="M242 210 L318 244 L242 278 L166 244 Z"/>
+    <path class="gate" id="n-gate" d="M242 210 L318 244 L242 278 L166 244 Z"/>
     <text class="nt" x="242" y="240" text-anchor="middle">Retrieval gate</text>
     <text class="ns" x="242" y="258" text-anchor="middle">${s.gate_skips} skip · ${s.gate_retrieves} retrieve</text>
-    ${flow("M242 210 L242 116","dash")}${flowLbl(252,168,"only if needed")}
+    ${flow("M242 210 L242 116","dash","e-gate-wm")}${flowLbl(252,168,"only if needed")}
 
     <!-- memory pillars → one clean arrow up into the gate -->
     ${lbl(28,318,"MEMORY — three pillars")}
-    ${box(28,330,188,54,"Procedural","SKILL.md · "+d.skills.length+" skill(s)","memory")}
-    ${box(228,330,188,54,"Semantic · FTS5",d.facts.length+" facts","memory")}
-    ${box(428,330,182,54,"Episodic",d.episodes.length+" episodes","memory")}
-    ${flow("M242 330 L242 280","dash")}
+    ${box(28,330,188,54,"Procedural","SKILL.md · "+d.skills.length+" skill(s)","memory","","procedural")}
+    ${box(228,330,188,54,"Semantic · FTS5",d.facts.length+" facts","memory","","semantic")}
+    ${box(428,330,182,54,"Episodic",d.episodes.length+" episodes","memory","","episodic")}
+    ${flow("M242 330 L242 280","dash","e-mem-gate")}
 
     <!-- consolidation, one short arrow up -->
-    ${box(28,414,582,50,"Consolidation · every "+d.consolidate_every+" exchanges",d.chat_pending+"/"+d.consolidate_every*2+" queued → distilled into facts","memory")}
-    ${flow("M300 414 L300 386")}${flowLbl(310,404,"distill")}
+    ${box(28,414,582,50,"Consolidation · every "+d.consolidate_every+" exchanges",d.chat_pending+"/"+d.consolidate_every*2+" queued → distilled into facts","memory","","consolidation")}
+    ${flow("M300 414 L300 386","","e-consol-sem")}${flowLbl(310,404,"distill")}
 
     <!-- LLM OPS: the outer loop — observes the run, then improves it -->
     <rect class="container ops" x="664" y="20" width="288" height="360" rx="14"/>
     ${lbl(682,46,"LLM OPS — the outer loop")}
     <!-- every turn feeds the trace -->
-    <path class="flow" d="M624 96 C650 90 662 84 682 82" marker-end="url(#arr)"/>
+    <path class="flow" id="e-reply-trace" d="M624 96 C650 90 662 84 682 82" marker-end="url(#arr)"/>
     ${flowLbl(636,74,"each turn")}
-    ${box(682,60,252,48,"Trace",s.trace_files+" file(s) · always on","ops")}
+    ${box(682,60,252,48,"Trace",s.trace_files+" file(s) · always on","ops","","trace")}
     ${flow("M808 108 L808 124")}
     ${box(682,124,252,48,"Eval","deterministic + judge","ops")}
     ${flow("M808 172 L808 188")}
@@ -526,7 +562,7 @@ const VIEWS = {
       ].map(([v,l,c])=>`<div class="tile"><b class="${c}">${v}</b><span>${l}</span></div>`).join("");
     return `<div class="tiles">${tiles}</div>
     <h2>Retrieval gate — the hero decision</h2>${gateSplit(s)}
-    <h2 style="margin-top:26px">Architecture — click any box</h2>
+    <h2 style="margin-top:26px">Architecture — click any box <span id="arch-status" class="arch-status"></span></h2>
     ${archSVG(d)}
     <h2>Latest turn</h2>${d.turns.length?turnCard(d.turns[0]):'<div class="card empty">no turns yet — talk to Jarvis first</div>'}`;
   },
@@ -591,6 +627,52 @@ const VIEWS = {
   },
 };
 
+// ---- Live harness animation: light up the diagram as a turn flows through,
+// driven by the trace stream so ANY gateway (browser, phone, CLI) triggers it.
+const STAGE = {
+  turn_start:    {nodes:["gateway","wm"],            edges:["e-gw-wm"],                 label:"message in"},
+  gate:          {nodes:["gate"],                    edges:["e-gate-wm"],               label:"retrieval gate"},
+  llm:           {nodes:["llm"],                     edges:["e-wm-loop"],               label:"agent reasons"},
+  tool:          {nodes:["tools"],                   edges:[],                          label:"tool runs"},
+  turn_end:      {nodes:["reply","trace"],           edges:["e-reply-trace","e-reply-save"], label:"reply"},
+  consolidation: {nodes:["consolidation","semantic"],edges:["e-consol-sem"],            label:"consolidating memory"},
+};
+let evCursor = null, evQueue = [], playing = false, animating = false;
+
+function hot(sel, cls, ms){
+  const el = document.querySelector(sel);
+  if (!el) return;
+  el.classList.add(cls);
+  setTimeout(()=>el.classList.remove(cls), ms);
+}
+function animateStage(ev){
+  const spec = STAGE[ev.type];
+  if (!spec || !document.querySelector(".arch")) return;
+  const status = document.getElementById("arch-status");
+  if (status) status.innerHTML = `<span class="live-dot"></span>${spec.label}`;
+  spec.nodes.forEach(n => hot("#n-"+n, n==="gate" ? "hot" : "hot", 950));
+  spec.edges.forEach(e => hot("#"+e, "live", 950));
+  if (ev.type==="gate" && ev.decision==="retrieve")
+    ["procedural","semantic","episodic"].forEach(n => { hot("#n-"+n,"hot",950); hot("#e-mem-gate","live",950); });
+}
+function playNext(){
+  if (!evQueue.length){ playing=false; animating=false;
+    const st=document.getElementById("arch-status"); if(st) st.innerHTML=""; return; }
+  playing = true; animating = true;
+  animateStage(evQueue.shift());
+  setTimeout(playNext, 620);   // stagger so stages light up in sequence
+}
+async function pollEvents(){
+  try{
+    const r = await (await fetch("/api/events" + (evCursor==null?"":"?cursor="+evCursor))).json();
+    if (evCursor != null && r.events.length){
+      evQueue.push(...r.events);
+      if (!playing) playNext();
+    }
+    evCursor = r.cursor;
+  } catch(e){ /* server busy */ }
+}
+
 let activeView = null;
 const TITLES = {chat:"Chat & watch", ops:"LLM Ops"};
 function render(){
@@ -603,6 +685,9 @@ function render(){
   // (re)build it only when first entering the tab.
   if (view === "chat"){
     if (activeView !== "chat"){ document.getElementById("view").innerHTML = chatView(); wireChat(); }
+  } else if (view === "overview"){
+    // don't rebuild mid-animation or the glowing SVG gets wiped
+    if (activeView !== "overview" || !animating){ document.getElementById("view").innerHTML = VIEWS.overview(D); }
   } else {
     document.getElementById("view").innerHTML = VIEWS[view](D);
   }
@@ -625,7 +710,9 @@ async function refresh(){
   catch(e){ /* server restarting — keep showing last data */ }
 }
 window.addEventListener("hashchange", render);
+window.__hold = (v)=>{ animating = v; };   // test hook: freeze the diagram
 refresh(); setInterval(refresh, 5000); setInterval(tickLive, 1000);
+pollEvents(); setInterval(pollEvents, 450);   // live harness animation
 </script></body></html>"""
 
 
@@ -640,6 +727,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 — http.server API
         if self.path == "/api/data":
             self._send(json.dumps(collect(), default=str).encode(), "application/json")
+        elif self.path.startswith("/api/events"):
+            from urllib.parse import parse_qs, urlparse
+
+            raw = parse_qs(urlparse(self.path).query).get("cursor", [None])[0]
+            cursor = int(raw) if raw and raw.lstrip("-").isdigit() else None
+            self._send(json.dumps(events_since(cursor)).encode(), "application/json")
         else:
             self._send(PAGE.encode(), "text/html; charset=utf-8")
 
