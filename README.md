@@ -88,6 +88,34 @@ Every box on the architecture diagram is one module ([diagram](docs/architecture
 | Eval: deterministic vs LLM-as-judge | [`evals/deterministic/`](evals/deterministic) vs [`evals/judge/`](evals/judge) |
 | Gate → Release | [`jarvis/ops/release_gate.py`](jarvis/ops/release_gate.py) |
 
+## The Loop — reason → act → repeat
+
+Yes, there's a real agent loop, and it's [~95 lines of plain Python](jarvis/loop/agent.py) —
+no LangGraph, no hidden control flow:
+
+```
+while not done:
+    response = llm(messages, tools)      # reason
+    if response wants tools:
+        results = run(tool_calls)        # act
+        messages += results              # observe
+    else:
+        done                             # reply to the human
+```
+
+Two guardrails end every turn: the model stops asking for tools (natural end), or it hits
+`max_iterations` (hard stop — it never spins forever). That's "loop engineering": the exit
+conditions, the tool round-trip, and feeding results back as working memory.
+
+**How to show it on camera:**
+1. Type *"schedule a swim with Sergey Saturday at 5pm"* in the chat dock and watch the **LOOP**
+   box on the Overview diagram light up: reason → `create_event` → reason → reply.
+2. Open the **Loop** tab — every turn is listed with its gate decision, each tool call, the
+   **iteration count**, tokens, and dollar cost. A tool-using turn shows `iter 2` (reason,
+   act, then reason again to reply); a plain answer shows `iter 1`.
+3. Open the **Ops** tab (or `.jarvis/traces/<today>.jsonl`) to read that same turn as raw
+   events in order: `turn_start → gate → llm → tool → llm → turn_end`. That's the loop, on tape.
+
 ## The two hero moments
 
 **1. The retrieval gate.** Most agents hit their memory store on every turn. That's
@@ -107,7 +135,34 @@ is a judged score with a threshold (`make eval-judge`). Conflating the two is th
 common eval mistake; here they're separate suites you can diff. `make gate` runs both
 as a release gate.
 
-## See your agent think (deep traces)
+## Eval, tracing & catching bugs
+
+Three commands, two kinds of eval — the LLM-Ops half of the system:
+
+```bash
+make eval          # deterministic: "did the right tool fire?" — 0 or 1, no model judges it
+make eval-judge    # LLM-as-judge: "was the reply helpful?" — a scored %, needs a key
+make gate          # the release gate: deterministic must pass 100%, judge must clear threshold
+```
+
+Deterministic tests are plain pytest in [`evals/deterministic/`](evals/deterministic); judged
+ones use DeepEval in [`evals/judge/`](evals/judge). Keeping them apart is the whole point —
+conflating "did it do the thing" (a unit test) with "was it any good" (a scored judgement) is
+the most common eval mistake.
+
+**Where the results show:** the terminal, and the dashboard's **Ops** tab — the release-gate
+verdict, an **eval-history** table (one row per `make gate`, so you can see it grow), the actual
+per-turn gate decisions, and the raw traces inline.
+
+**The bug workflow (this is the discipline you show on camera):** when you catch a bug by using
+the thing live, you fix it AND add a deterministic case so it can never come back. A real example
+from this repo: the agent didn't know the current *time* and asked for it before scheduling
+"in 30 minutes" → fixed in [`session.py`](jarvis/runtime/session.py), locked forever by
+[`test_working_memory.py`](evals/deterministic/test_working_memory.py). Run `make gate` → green →
+the eval history records the run.
+
+**Tracing is always on:** every turn appends readable lines to `.jarvis/traces/<date>.jsonl`
+(zero setup) — a trace is just "what happened, in order." For span-waterfall views:
 
 ```bash
 pip install -e '.[tracing]'
@@ -115,8 +170,19 @@ make trace                                            # Phoenix at localhost:600
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 make run
 ```
 
-Every run always writes a plain-text trace to `.jarvis/traces/*.jsonl` too — a trace
-is just "what happened, in order." Langfuse cloud works with the same env toggle.
+Langfuse cloud speaks the same OTel toggle.
+
+## Recording a clean demo
+
+```bash
+python scripts/demo_seed.py            # resets .jarvis to a tidy, curated state
+```
+
+It backs up your current `.jarvis` first, then seeds a few clean facts, one episode, and one
+event — Sergey's standing **Saturday 5 PM swim**. The chat log and traces start **empty**, so
+when you type live the Loop, traces, and Gateway inbox fill up in front of the viewer. The
+memory/Data/Tools tabs already have tidy content to explain. Edit the seed lists at the top of
+the script to taste.
 
 ## Talk to it
 
