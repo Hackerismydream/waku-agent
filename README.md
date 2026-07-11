@@ -38,23 +38,26 @@ The loop speaks one dialect; a [~60-line adapter](jarvis/loop/models.py) covers 
 make dashboard          # http://localhost:7777
 ```
 
-This is the fastest way to *understand* the system. The **Chat & watch** tab puts a live
-architecture diagram above a chat box: send a message and watch it flow through the
-harness — the retrieval gate lights up, the loop calls a tool, the reply comes back,
-memory updates — the same pipeline every gateway (terminal, phone, voice) drives.
+This is the fastest way to *understand* the system. A chat dock sits on the right of
+every tab — type or **speak** (local Whisper, no cloud) and watch it flow through the
+harness on the Overview diagram: the retrieval gate lights up, the loop calls a tool,
+the reply comes back, memory updates — the same pipeline every gateway drives. The whole
+frontend is plain static files (`jarvis/ops/static/`), served with no build step.
 
 Every tab is a window into one pillar, and each links straight to the real local files:
 
 | Tab | What you see |
 |---|---|
-| **Chat & watch** | the live animated diagram + a chat box, with *New chat* + history — type and watch the flow |
 | **Overview** | cost, latency, the gate skip/retrieve split, the clickable architecture map |
-| **Sessions** | the full conversation history across every gateway |
+| **Gateway** | one conversation across every channel, each message tagged by source (dashboard / telegram / voice / cli) |
 | **Loop** | every turn with its gate decision, tool calls, tokens, and cost |
 | **Memory** | sub-tabs per pillar — semantic facts, episodes, editable skills + SOUL, consolidation |
 | **Tools** | the agent's available tools (grouped by origin), its results, and MCP connectors |
 | **Data** | a live SQLite browser: per-table tabs, schema, and a read-only SQL console over `state.db` |
 | **Ops** | eval verdict + history, the gate decisions, slowest turns, and inline JSONL traces |
+
+The sidebar and chat dock are drag-resizable and hideable, and the chat has *New chat* +
+history like any chat app.
 
 ## How is this different from Claude Desktop / ChatGPT / Cowork?
 
