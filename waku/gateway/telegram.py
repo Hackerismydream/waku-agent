@@ -80,7 +80,26 @@ def start_in_background() -> bool:
 
     allowed = os.getenv("TELEGRAM_ALLOWED_USER", "")
 
+    import logging
+
+    warned = {"conflict": False}
+
+    def on_poll_error(exc: Exception) -> None:
+        # Runs on every polling error. The common one is Conflict: another bot
+        # instance is already polling this token. Say it ONCE, plainly, and never
+        # dump a traceback into the dashboard terminal.
+        from telegram.error import Conflict
+
+        if isinstance(exc, Conflict) and not warned["conflict"]:
+            warned["conflict"] = True
+            print("(telegram) another instance is already running this bot — the dashboard's "
+                  "Telegram stays idle. Stop the other `waku telegram` and restart to use it here.")
+
     def run() -> None:
+        # keep PTB's own error logging out of the dashboard terminal; we report
+        # the one error that matters (Conflict) cleanly via on_poll_error.
+        logging.getLogger("telegram").setLevel(logging.CRITICAL)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
         # its own event loop on this thread; start_polling is non-blocking, then
         # run_forever keeps it alive until the process (a daemon thread) exits.
         loop = asyncio.new_event_loop()
@@ -89,7 +108,7 @@ def start_in_background() -> bool:
             app = _build_app(token, allowed)
             loop.run_until_complete(app.initialize())
             loop.run_until_complete(app.start())
-            loop.run_until_complete(app.updater.start_polling())
+            loop.run_until_complete(app.updater.start_polling(error_callback=on_poll_error))
             loop.run_forever()
         except Exception as exc:  # noqa: BLE001 — isolate the dashboard from bot errors
             print(f"(telegram) background poller stopped: {exc}")

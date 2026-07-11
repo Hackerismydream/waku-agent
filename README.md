@@ -25,11 +25,15 @@ zero frameworks hiding the interesting parts. Built for the
 
 ```bash
 git clone https://github.com/ShenSeanChen/waku-agent && cd waku-agent
-uv venv && uv pip install -e .          # installs the `waku` command (or: pip install -e .)
+uv venv && source .venv/bin/activate    # create the env AND activate it (so `waku` is on PATH)
+uv pip install -e .                     # installs the `waku` command
 cp .env.example .env                    # pick a provider, paste ONE key
 waku                                    # talk to your Waku in the terminal
 waku dashboard                          # …or the browser cockpit → localhost:7777
 ```
+
+> If you see `waku: command not found`, the venv isn't active — run `source .venv/bin/activate`
+> (or use `uv run waku dashboard`). `make dashboard` always works without activating.
 
 `waku` and `waku dashboard` are two doorways into the **same** local Waku (same
 `state.db`, same loop). `waku dashboard` starts a tiny web server on **your** machine; when
