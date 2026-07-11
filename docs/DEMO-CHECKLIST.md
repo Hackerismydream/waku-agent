@@ -7,7 +7,7 @@ proves, where to look, and whether it's been dry-run verified. Keep this updated
 
 - [x] Provider = `anthropic` (best streaming; Gemini breaks multi-turn tool use) — Settings
 - [x] Free `TAVILY_API_KEY` pasted on the Settings page (for the World Cup beat)
-- [x] Clean curated state — `python scripts/demo_seed.py` (keeps traces + `usage.jsonl` spend)
+- [x] Clean curated state — `python scripts/demo_seed.py` (clears Loop/Tools traces + Ops eval history; keeps `usage.jsonl` spend unless you pass `--reset-spend`)
 - [x] `waku dashboard` running on your own machine (also starts Telegram if a token is set) → `localhost:7777` in a real browser
 
 ## The beats
@@ -44,6 +44,7 @@ permanent spend ledger + `MEMORY.md`, source-tagged Gateway, coming-soon skeleto
 
 ## Reset between takes
 
-`python scripts/demo_seed.py` — clears the memory/calendar for a clean take but **keeps** traces and
-`usage.jsonl` (your real spend) and backs up the whole `.waku` first. It never deletes the db file,
-so a running `make dashboard`/`make telegram` keeps working. Nothing else clears your data.
+`python scripts/demo_seed.py` — clears the memory/calendar **and** the Loop/Tools traces + Ops eval
+history for a clean take, and backs up the whole `.waku` first. The `usage.jsonl` spend ledger is
+**kept** (it's a permanent record) unless you pass `--reset-spend`. It never deletes the db file, so a
+running `waku dashboard`/`waku telegram` keeps working. Nothing else clears your data.

@@ -1,14 +1,18 @@
 """Reset .waku to a clean, curated state for a demo / recording.
 
-    python scripts/demo_seed.py
+    python scripts/demo_seed.py                 # clean slate, KEEPS the spend ledger
+    python scripts/demo_seed.py --reset-spend   # also wipe usage.jsonl (money/tokens)
 
 What it does (your old state is backed up first, never just deleted):
   1. moves the current .waku aside to .waku.bak-<timestamp>
   2. creates a fresh state.db + calendar.ics
   3. seeds a small, clean memory (a few facts + one episode) and ONE calendar
      event — Sergey's standing Saturday 5 PM swim
-  4. leaves traces/, outbox/ and the chat log EMPTY, so when you type live on
-     camera the loop, traces and Gateway inbox fill up in front of the viewer
+  4. clears the loop/tool traces AND the Ops eval history, so the Loop, Tools and
+     Ops tabs start empty and fill up live in front of the viewer as you type
+
+The money/token spend ledger (usage.jsonl) is treated as a permanent record and
+is KEPT by default — it's only wiped when you explicitly pass --reset-spend.
 
 Everything it writes is the same data the app writes — open state.db afterwards
 and it looks exactly like real use, just tidy.
@@ -16,6 +20,7 @@ and it looks exactly like real use, just tidy.
 
 from __future__ import annotations
 
+import argparse
 import shutil
 from datetime import datetime
 
@@ -27,16 +32,19 @@ from waku.tools.calendar import make_tool
 
 # Curated seed — clean, no duplicates. Edit these to taste before recording.
 FACTS = [
-    ("sergey", "Sergey is the user's swim buddy; they have a standing swim every Saturday at 5 PM."),
-    ("raj", "Raj is a friend the user plays tennis with."),
-    ("user", "The user runs the YouTube channel 'Sean's AI Stories' and films implementation walkthroughs."),
+    ("user", "The user runs the YouTube channel 'Sean's AI Stories' and films implementation "
+             "walkthroughs. His X account is @ShenSeanChen. All of his Chinese social media "
+             "accounts are called 肖恩君Sean."),
+    ("raj", "Raj is a close friend who plays really great tennis and always teaches me great "
+            "British slangs!"),
+    ("sergey", "Sergey is the close friend who loves swimming and often cooks delicious food!"),
 ]
 EPISODE = ("2026-07-11", "Confirmed the standing Saturday 5 PM swim with Sergey.")
 EVENT = {"title": "Swim with Sergey", "start": "2026-07-11T17:00",
          "end": "2026-07-11T18:00", "attendees": "Sergey"}
 
 
-def main() -> None:
+def main(reset_spend: bool = False) -> None:
     settings = load_settings()
     home = settings.home
 
@@ -46,14 +54,18 @@ def main() -> None:
         shutil.copytree(home, backup)
         print(f"backed up {home} -> {backup}")
         # calendar.ics + these dirs are plain files no process holds open.
-        # NOTE: we deliberately KEEP traces/ and usage.jsonl — the trace history
-        # and the money/token spend ledger are a permanent record, not demo data,
-        # so a reset never erases what you've actually spent.
+        # traces/ = the Loop & Tools history; clear it so those tabs start empty.
         (home / "calendar.ics").unlink(missing_ok=True)
-        for sub in ("outbox", "skills"):
+        for sub in ("outbox", "skills", "traces"):
             d = home / sub
             if d.exists():
                 shutil.rmtree(d)
+        # Ops eval history — start empty so a live `make gate` adds a visible row.
+        (home / "eval_runs.jsonl").unlink(missing_ok=True)
+        (home / "eval_report.json").unlink(missing_ok=True)
+        # The spend ledger is a permanent record — only wiped on explicit request.
+        if reset_spend:
+            (home / "usage.jsonl").unlink(missing_ok=True)
 
     settings.ensure_home()
     conn = connect(home)
@@ -80,9 +92,17 @@ def main() -> None:
 
     print(f"\nclean demo state ready in {home}")
     print(f"  facts: {len(FACTS)}  ·  episodes: 1  ·  events: 1  ·  chat log: cleared")
-    print("  KEPT: SOUL.md, eval reports, traces/, and usage.jsonl (your real spend).")
-    print("  Run `make dashboard` and start filming.")
+    print("  CLEARED: loop/tool traces, Ops eval history, outbox, skills.")
+    if reset_spend:
+        print("  CLEARED: usage.jsonl (money/token spend) — you approved this.")
+    else:
+        print("  KEPT: SOUL.md and usage.jsonl (your real spend — pass --reset-spend to wipe).")
+    print("  Run `waku dashboard` and start filming.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Reset .waku to a clean demo state.")
+    parser.add_argument("--reset-spend", action="store_true",
+                        help="also wipe usage.jsonl (the money/token spend ledger)")
+    args = parser.parse_args()
+    main(reset_spend=args.reset_spend)
