@@ -123,12 +123,19 @@ const streamingCard = m => `<div class="card">
      : `<div class="meta" style="margin:0">thinking&hellip;</div>`}
 </div>`;
 
+// Messages loaded from history (a switched/opened conversation) have no live
+// latency/iteration data, and their stored form carries an internal
+// "[tools used: ...]" annotation — strip both so the thread reads cleanly.
+const stripTools = t => (t || "").replace(/\s*\[tools used:[\s\S]*\]\s*$/, "").trim();
+const historicalCard = m => `<div class="card"><div class="r">${esc(stripTools(m.reply))}</div></div>`;
+
 function renderChatLog(){
   if (!CHAT.length)
     return `<div class="empty" style="padding:6px 2px">Message Waku here from any tab. Open Overview to watch it flow through the harness, or the Gateway tab to see every channel's messages together.</div>`;
   return CHAT.map(m => m.role==="user"
       ? `<div class="bubble">${esc(m.text)}</div>`
       : m.pending ? streamingCard(m)
+      : m.historical ? historicalCard(m)
       : chatTurnCard(m)).join("");
 }
 
@@ -379,11 +386,13 @@ function toggleSessMenu(ev){
   const sessions = (D && D.sessions) || [];
   const menu = document.createElement("div");
   menu.className = "sessmenu"; menu.id = "sessmenu";
-  menu.innerHTML = sessions.length ? sessions.map(s => `
-    <div class="sessitem ${s.id===SESSION?"on":""}" onclick="switchSession('${esc(s.id)}')">
-      <div>${esc(s.title||s.id)}</div>
-      <div class="sm">${s.messages} msg · ${esc((s.last_at||"").slice(0,16))}</div>
-    </div>`).join("") : `<div class="sessitem">no past conversations yet</div>`;
+  menu.innerHTML = sessions.length ? sessions.map(s => {
+    const tags = (s.sources||[]).map(src => `<span class="gwtag ${esc(src)}">${esc(src)}</span>`).join("");
+    return `<div class="sessitem ${s.id===SESSION?"on":""}" onclick="openConversation('${esc(s.id)}')">
+      <div>${esc(s.title||s.id)} ${tags}</div>
+      <div class="sm">${s.messages} msg · ${esc((s.last_at||"").slice(0,16).replace("T"," "))}</div>
+    </div>`;
+  }).join("") : `<div class="sessitem">no past conversations yet</div>`;
   const r = ev.currentTarget.getBoundingClientRect();
   menu.style.top = (r.bottom+6)+"px";
   menu.style.left = Math.max(8, r.right-300)+"px";
