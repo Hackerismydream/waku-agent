@@ -82,6 +82,38 @@ def chat(message: str) -> dict:
         "latency_ms": latency_ms,
     }
 
+
+def chat_stream(message: str, emit) -> None:
+    """Run one turn, calling emit(kind, event) for every harness event AS it
+    happens — gate decision, tool calls, and the reply text token by token —
+    so the browser can show thinking stream in (like the CLI/voice do). Ends
+    with a 'done' event carrying the final structured result."""
+    events: list[dict] = []
+
+    def observer(kind, ev):
+        if kind in ("gate", "consolidation"):
+            events.append({"kind": kind, **ev})
+        emit(kind, ev)
+
+    with _agent_lock:
+        agent = _get_agent()
+        start = datetime.now(timezone.utc)
+        result = agent.respond(message, observer=observer, source="dashboard", stream=True)
+        latency_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
+
+    gate = next((e for e in events if e["kind"] == "gate"), None)
+    cons = next((e for e in events if e["kind"] == "consolidation"), None)
+    emit("done", {
+        "reply": result.reply,
+        "gate": {"decision": gate["decision"], "reason": gate.get("reason")} if gate else None,
+        "tools": [{"tool": c["tool"], "args": c["args"], "output": c["output"],
+                   "status": _tool_status(c["output"]),
+                   "summary": (c["output"] or "").split(". ")[0][:120]} for c in result.tool_calls],
+        "consolidation": {"new_facts": cons["new_facts"]} if cons else None,
+        "iterations": result.iterations,
+        "latency_ms": latency_ms,
+    })
+
 # Rough $/million tokens (in, out) for a dollar ESTIMATE — the number humans
 # actually feel. Keyed by provider; deliberately approximate and labelled "est".
 PRICING = {
@@ -668,6 +700,30 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/voice":
             raw = self.rfile.read(length)
             self._send(json.dumps(transcribe_audio(raw)).encode(), "application/json")
+            return
+        # /api/chat/stream streams harness events (SSE) as the turn runs.
+        if self.path == "/api/chat/stream":
+            payload = json.loads(self.rfile.read(length) or "{}")
+            message = (payload.get("message") or "").strip()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+
+            def emit(kind, ev):
+                try:
+                    self.wfile.write(f"data: {json.dumps({'kind': kind, **ev}, default=str)}\n\n".encode())
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # the browser navigated away mid-stream — fine
+
+            if not message:
+                emit("done", {"error": "empty message"})
+                return
+            try:
+                chat_stream(message, emit)
+            except Exception as exc:  # surface as a terminal event, don't 500
+                emit("done", {"error": f"{type(exc).__name__}: {exc}"})
             return
         routes = {"/api/chat": None, "/api/memory": memory_action, "/api/settings": apply_settings,
                   "/api/query": run_query, "/api/session": session_action}

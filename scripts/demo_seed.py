@@ -28,7 +28,7 @@ from jarvis.tools.calendar import make_tool
 # Curated seed — clean, no duplicates. Edit these to taste before recording.
 FACTS = [
     ("sergey", "Sergey is the user's swim buddy; they have a standing swim every Saturday at 5 PM."),
-    ("priya", "Priya is a friend the user plays tennis with."),
+    ("raj", "Raj is a friend the user plays tennis with."),
     ("user", "The user runs the YouTube channel 'Sean's AI Stories' and films implementation walkthroughs."),
 ]
 EPISODE = ("2026-07-11", "Confirmed the standing Saturday 5 PM swim with Sergey.")

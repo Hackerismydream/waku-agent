@@ -69,6 +69,8 @@ class Tracer:
 
     # ---- the Observer: called by the loop for every llm/tool/gate/... event
     def event(self, kind: str, event: dict) -> None:
+        if kind == "text":
+            return  # streaming token deltas are for the live UI, not the trace
         self._write({"type": kind, **event})
         if self._otel_tracer and self._span_ctx is not None:
             with self._otel_tracer.start_as_current_span(

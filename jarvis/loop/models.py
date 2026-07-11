@@ -87,9 +87,9 @@ class OpenAICompatClient:
         import openai
 
         self._client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
-        self.messages = SimpleNamespace(create=self._create)
+        self.messages = SimpleNamespace(create=self._create, stream=self._stream)
 
-    def _create(self, *, model, messages, max_tokens, system=None, tools=None):
+    def _to_openai(self, *, model, messages, max_tokens, system=None, tools=None) -> dict:
         oai_messages = []
         if system:
             oai_messages.append({"role": "system", "content": system})
@@ -128,13 +128,22 @@ class OpenAICompatClient:
                               "parameters": t["input_schema"]}}
                 for t in tools
             ]
-        try:
-            response = self._client.chat.completions.create(**kwargs)
-        except Exception:
-            # older OpenAI-compatible endpoints only know max_tokens
-            kwargs["max_tokens"] = kwargs.pop("max_completion_tokens")
-            response = self._client.chat.completions.create(**kwargs)
+        return kwargs
 
+    def _call(self, kwargs: dict, **extra):
+        """Run chat.completions.create with the max_tokens key-name fallback
+        (older OpenAI-compatible endpoints only know max_tokens, not the newer
+        max_completion_tokens)."""
+        try:
+            return self._client.chat.completions.create(**kwargs, **extra)
+        except Exception:
+            k = dict(kwargs)
+            k["max_tokens"] = k.pop("max_completion_tokens", None)
+            return self._client.chat.completions.create(**k, **extra)
+
+    def _create(self, *, model, messages, max_tokens, system=None, tools=None):
+        response = self._call(self._to_openai(
+            model=model, messages=messages, max_tokens=max_tokens, system=system, tools=tools))
         choice = response.choices[0].message
         blocks = []
         if choice.content:
@@ -151,5 +160,72 @@ class OpenAICompatClient:
                 input_tokens=getattr(usage, "prompt_tokens", 0),
                 output_tokens=getattr(usage, "completion_tokens", 0),
             ),
+            content=blocks,
+        )
+
+    def _stream(self, *, model, messages, max_tokens, system=None, tools=None):
+        """Anthropic-shaped streaming over an OpenAI chat.completions stream —
+        same two-format bridge as _create, but yielding text as it arrives.
+        Used by the loop when stream=True (e.g. the dashboard's live chat)."""
+        kwargs = self._to_openai(
+            model=model, messages=messages, max_tokens=max_tokens, system=system, tools=tools)
+        return _OpenAIStream(self, kwargs)
+
+
+class _OpenAIStream:
+    """A context manager mirroring anthropic's messages.stream(): iterate
+    .text_stream for text deltas, then .get_final_message() for the assembled
+    Anthropic-shaped response (text + reassembled tool calls + usage)."""
+
+    def __init__(self, client: OpenAICompatClient, kwargs: dict):
+        self._client = client
+        self._kwargs = kwargs
+        self._text: list[str] = []
+        self._tools: dict[int, dict] = {}   # index → {id, name, args}
+        self._usage = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    @property
+    def text_stream(self):
+        stream = self._client._call(
+            self._kwargs, stream=True, stream_options={"include_usage": True})
+        for chunk in stream:
+            if getattr(chunk, "usage", None):
+                self._usage = chunk.usage
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if getattr(delta, "content", None):
+                self._text.append(delta.content)
+                yield delta.content
+            for tc in (getattr(delta, "tool_calls", None) or []):
+                slot = self._tools.setdefault(tc.index, {"id": None, "name": "", "args": ""})
+                if tc.id:
+                    slot["id"] = tc.id
+                if tc.function and tc.function.name:
+                    slot["name"] = tc.function.name
+                if tc.function and tc.function.arguments:
+                    slot["args"] += tc.function.arguments
+
+    def get_final_message(self):
+        blocks = []
+        text = "".join(self._text)
+        if text:
+            blocks.append(SimpleNamespace(type="text", text=text))
+        for slot in self._tools.values():
+            blocks.append(SimpleNamespace(
+                type="tool_use", id=slot["id"], name=slot["name"],
+                input=json.loads(slot["args"] or "{}")))
+        usage = self._usage
+        return SimpleNamespace(
+            stop_reason="tool_use" if self._tools else "end_turn",
+            usage=SimpleNamespace(
+                input_tokens=getattr(usage, "prompt_tokens", 0),
+                output_tokens=getattr(usage, "completion_tokens", 0)),
             content=blocks,
         )

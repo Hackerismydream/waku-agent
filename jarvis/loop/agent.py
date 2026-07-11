@@ -46,24 +46,43 @@ def run_loop(
     max_iterations: int = 10,
     max_tokens: int = 2048,
     observer: Observer | None = None,
+    stream: bool = False,
 ) -> LoopResult:
     """Run one agent turn. `messages` is mutated in place — after the call it
     contains the full working memory of the turn (assistant thoughts, tool
-    calls, tool results), which is exactly what gets traced."""
+    calls, tool results), which is exactly what gets traced.
+
+    stream=True emits the assistant's text as it's generated (notify("text",
+    {"delta": ...})) so a gateway can show it appear token by token — used by
+    the dashboard. Falls back to a single call for clients without streaming."""
     notify = observer or (lambda kind, ev: None)
     result = LoopResult(reply="")
+    can_stream = stream and hasattr(client.messages, "stream")
 
     for iteration in range(1, max_iterations + 1):
         result.iterations = iteration
 
         # ---- reason: one LLM call with the current working memory
-        response = client.messages.create(
-            model=model,
-            system=system,
-            messages=messages,
-            tools=tools.schemas(),
-            max_tokens=max_tokens,
-        )
+        response = None
+        if can_stream:
+            try:
+                with client.messages.stream(
+                    model=model, system=system, messages=messages,
+                    tools=tools.schemas(), max_tokens=max_tokens,
+                ) as s:
+                    for delta in s.text_stream:
+                        notify("text", {"delta": delta})
+                    response = s.get_final_message()
+            except Exception:
+                response = None  # any streaming hiccup → fall back to one call
+        if response is None:
+            response = client.messages.create(
+                model=model,
+                system=system,
+                messages=messages,
+                tools=tools.schemas(),
+                max_tokens=max_tokens,
+            )
         notify("llm", {"iteration": iteration, "stop_reason": response.stop_reason,
                        "usage": {"in": response.usage.input_tokens, "out": response.usage.output_tokens}})
 

@@ -40,10 +40,11 @@ class Jarvis:
             self.mcp_bridge.close()
 
     def respond(self, user_message: str, observer: Observer | None = None,
-                source: str = "cli") -> LoopResult:
+                source: str = "cli", stream: bool = False) -> LoopResult:
         """One full turn: assemble working memory → run the loop → persist.
         `source` tags which gateway the message arrived through (cli / voice /
         telegram / dashboard), so the unified chat can show its origin.
+        `stream=True` streams the reply text token by token to the observer.
         Everything that happens is both shown (observer) and recorded (tracer)."""
         notify = compose(observer, self.tracer.event)
 
@@ -60,6 +61,7 @@ class Jarvis:
                 max_iterations=self.settings.max_iterations,
                 max_tokens=self.settings.max_tokens,
                 observer=notify,
+                stream=stream,
             )
 
             self.session.add_exchange(user_message, result.reply, tool_calls=result.tool_calls,

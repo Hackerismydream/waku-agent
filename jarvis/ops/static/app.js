@@ -101,12 +101,27 @@ const chatTurnCard = t => `<div class="card">
   <div class="meta">${secs(t.latency_ms)} · ${t.iterations??"?"} iter${t.consolidation?` · consolidated ${t.consolidation.new_facts} fact(s)`:""}</div>
 </div>`;
 
+// While a turn runs we stream it live: stages light up as the harness reaches
+// them, and the reply text appears token by token (with a blinking caret).
+const streamingCard = m => `<div class="card">
+  <div class="stages">
+    <span class="stage ${m.gate?"done":"on"}">gate${m.gate?` · ${esc(m.gate.decision)}`:""}</span>
+    ${(m.tools||[]).map(x=>`<span class="stage done">tool · ${esc(x.tool)}</span>`).join("")}
+    <span class="stage ${m.stream?"on":""}">reply</span>
+  </div>
+  ${m.gate&&m.gate.reason?`<div class="meta" style="margin:0 0 6px">${esc(m.gate.reason)}</div>`:""}
+  ${(m.tools||[]).map(toolRow).join("")}
+  ${m.stream
+     ? `<div class="r" style="margin-top:8px">${esc(m.stream)}<span class="caret"></span></div>`
+     : `<div class="meta" style="margin:0">thinking&hellip;</div>`}
+</div>`;
+
 function renderChatLog(){
   if (!CHAT.length)
     return `<div class="empty" style="padding:6px 2px">Message Jarvis here from any tab. Open Overview to watch it flow through the harness, or the Gateway tab to see every channel's messages together.</div>`;
   return CHAT.map(m => m.role==="user"
       ? `<div class="bubble">${esc(m.text)}</div>`
-      : m.pending ? `<div class="card"><div class="stages"><span class="stage on">gate</span><span class="stage">loop</span><span class="stage">tools</span><span class="stage">reply</span></div><div class="meta" style="margin:0">running the harness…</div></div>`
+      : m.pending ? streamingCard(m)
       : chatTurnCard(m)).join("");
 }
 
@@ -118,19 +133,51 @@ function syncChatLogs(){
   });
 }
 
+// One streamed harness event updates the live card in place.
+function applyStreamEvent(pending, ev){
+  if (ev.kind === "gate") pending.gate = {decision: ev.decision, reason: ev.reason};
+  else if (ev.kind === "text") pending.stream = (pending.stream || "") + (ev.delta || "");
+  else if (ev.kind === "tool"){
+    (pending.tools = pending.tools || []).push({
+      tool: ev.tool, args: ev.args, output: ev.output,
+      status: (ev.output||"").toLowerCase().startsWith("error") ? "error" : "ok",
+      summary: (ev.output || "").split(". ")[0].slice(0,120)});
+    pending.stream = "";   // a new assistant turn begins after the tool result
+  } else if (ev.kind === "done"){
+    pending.pending = false; pending.stream = "";
+    if (ev.error) pending.reply = "Error: " + ev.error;
+    else Object.assign(pending, ev);   // reply, tools, gate, iterations, latency_ms, consolidation
+  }
+}
+
 async function sendChat(fromInput){
   const input = fromInput || document.getElementById("msg") || document.getElementById("dmsg");
   const text = (input && input.value || "").trim();
   if (!text) return;
   input.value = "";
   CHAT.push({role:"user", text});
-  const pending = {role:"jarvis", pending:true};
+  const pending = {role:"jarvis", pending:true, stream:""};
   CHAT.push(pending);
   syncChatLogs();
   try {
-    const res = await (await fetch("/api/chat", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:text})})).json();
-    Object.assign(pending, {pending:false}, res.error ? {reply:"Error: "+res.error} : res);
+    const res = await fetch("/api/chat/stream", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:text})});
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;){
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0){
+        const line = buf.slice(0, i); buf = buf.slice(i + 2);
+        if (!line.startsWith("data:")) continue;
+        try { applyStreamEvent(pending, JSON.parse(line.slice(5).trim())); } catch(e){}
+        syncChatLogs();
+      }
+    }
   } catch(e){ Object.assign(pending, {pending:false, reply:"Error: "+e}); }
+  if (pending.pending) pending.pending = false;   // stream ended without a 'done'
   syncChatLogs();
   input.focus();
 }
