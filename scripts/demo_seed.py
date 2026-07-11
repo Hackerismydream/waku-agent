@@ -45,9 +45,12 @@ def main() -> None:
         backup = home.with_name(f"{home.name}.bak-{stamp}")
         shutil.copytree(home, backup)
         print(f"backed up {home} -> {backup}")
-        # calendar.ics + these dirs are plain files no process holds open
+        # calendar.ics + these dirs are plain files no process holds open.
+        # NOTE: we deliberately KEEP traces/ and usage.jsonl — the trace history
+        # and the money/token spend ledger are a permanent record, not demo data,
+        # so a reset never erases what you've actually spent.
         (home / "calendar.ics").unlink(missing_ok=True)
-        for sub in ("traces", "outbox", "skills"):
+        for sub in ("outbox", "skills"):
             d = home / sub
             if d.exists():
                 shutil.rmtree(d)
@@ -69,6 +72,11 @@ def main() -> None:
 
     create_event = make_tool(conn, home).fn
     print(create_event(**EVENT))
+
+    # regenerate the human-readable MEMORY.md mirror for the fresh state
+    from jarvis.memory import Memory
+
+    Memory(conn, settings, None).export_markdown()
 
     print(f"\nclean demo state ready in {home}")
     print(f"  facts: {len(FACTS)}  ·  episodes: 1  ·  events: 1  ·  chat log: empty  ·  traces: empty")

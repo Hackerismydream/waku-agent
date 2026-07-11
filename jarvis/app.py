@@ -68,6 +68,7 @@ class Jarvis:
                                       source=source)
             if self.memory is not None:
                 self.memory.maybe_consolidate(notify=notify)
+                self.memory.export_markdown()   # keep MEMORY.md in sync
 
         self.tracer.end_turn(result.reply, result.iterations)
         return result

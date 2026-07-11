@@ -122,6 +122,47 @@ PRICING = {
 }
 
 
+def usage_summary(home) -> dict:
+    """Read the PERMANENT spend ledger (usage.jsonl) → all-time tokens + dollar
+    cost, plus per-day and per-provider breakdowns. Cost is derived from tokens
+    with PRICING (approximate, labelled 'est'). This survives demo resets, so the
+    number is the real running total — trustworthy, not a per-session guess."""
+    recs = []
+    path = home / "usage.jsonl"
+    if path.exists():
+        for line in path.read_text().splitlines():
+            try:
+                recs.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+
+    def cost(r) -> float:
+        pin, pout = PRICING.get(r.get("provider"), (3.0, 15.0))
+        return r.get("in", 0) / 1e6 * pin + r.get("out", 0) / 1e6 * pout
+
+    def add(bucket, key, extra):
+        b = bucket.setdefault(key, {**extra, "calls": 0, "in": 0, "out": 0, "cost": 0.0})
+        b["calls"] += 1
+        b["in"] += r.get("in", 0)
+        b["out"] += r.get("out", 0)
+        b["cost"] += cost(r)
+
+    by_day, by_provider = {}, {}
+    for r in recs:
+        day = (r.get("ts") or "")[:10]
+        add(by_day, day, {"date": day})
+        add(by_provider, r.get("provider", "?"), {"provider": r.get("provider", "?")})
+
+    return {
+        "calls": len(recs),
+        "total_in": sum(r.get("in", 0) for r in recs),
+        "total_out": sum(r.get("out", 0) for r in recs),
+        "total_cost": round(sum(cost(r) for r in recs), 4),
+        "by_day": sorted(by_day.values(), key=lambda x: x["date"], reverse=True)[:30],
+        "by_provider": sorted(by_provider.values(), key=lambda x: -x["cost"]),
+    }
+
+
 def _parse_ts(ts: str):
     try:
         return datetime.fromisoformat(ts)
@@ -299,6 +340,7 @@ def collect() -> dict:
         "db": db_info,
         "settings": settings_info(),
         "tools": tools_info(),
+        "usage": usage_summary(home),
     }
 
 

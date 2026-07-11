@@ -130,11 +130,11 @@ Every box is one module (full version with every file path: [docs/architecture.m
 | Gate → Release | [`jarvis/ops/release_gate.py`](jarvis/ops/release_gate.py) |
 
 **A note on `MEMORY.md` vs `state.db`.** Some assistants (e.g. Hermes) keep long-term memory as a
-single `MEMORY.md` markdown file. Jarvis stores the same thing as structured rows in one SQLite
-file — `state.db`, with `facts` and `episodes` tables and an FTS5 keyword index — so memory is
-*queryable and searchable*, not a growing text blob. Same concept (durable memory the agent reads
-back), sturdier storage. The dashboard's **Memory** tab is the friendly view; the **Database** tab
-shows the raw `state.db` tables.
+single `MEMORY.md` markdown file. Jarvis keeps the *queryable* source in `state.db` (the `facts` and
+`episodes` tables, keyword-searchable via FTS5) **and** regenerates a human-readable
+`.jarvis/MEMORY.md` mirror after every turn — so you get both: a real file you can open, backed by a
+sturdy database. The dashboard's **Memory** tab is the friendly view; the **Database** tab shows the
+raw `state.db` tables.
 
 ## The Loop — reason → act → repeat
 
@@ -219,6 +219,11 @@ from this repo: the agent didn't know the current *time* and asked for it before
 "in 30 minutes" → fixed in [`session.py`](jarvis/runtime/session.py), locked forever by
 [`test_working_memory.py`](evals/deterministic/test_working_memory.py). Run `make gate` → green →
 the eval history records the run.
+
+**Spend is permanent:** every LLM call's tokens are appended to `.jarvis/usage.jsonl` — an
+append-only ledger that a demo reset never wipes. The **Ops** tab shows the all-time cost, tokens,
+and a per-day / per-provider breakdown (dollar cost is estimated from tokens, which are the ground
+truth). So the number you show on camera is your real running total, not a per-session guess.
 
 **Tracing is always on:** every turn appends readable lines to `.jarvis/traces/<date>.jsonl`
 (zero setup) — a trace is just "what happened, in order." For span-waterfall views:

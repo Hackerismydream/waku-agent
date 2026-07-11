@@ -115,6 +115,32 @@ class Memory:
             })
         return out
 
+    def export_markdown(self) -> None:
+        """Mirror memory to a human-readable MEMORY.md next to state.db — so the
+        whiteboard's `~/.jarvis/MEMORY.md` box is literally real, and "your memory
+        is a file you can open" is true. state.db stays the queryable source of
+        truth; this file is a generated view, refreshed after each turn."""
+        facts = self.conn.execute(
+            "SELECT subject, content FROM facts ORDER BY subject, id"
+        ).fetchall()
+        eps = self.conn.execute(
+            "SELECT happened_at, summary FROM episodes ORDER BY happened_at DESC, id DESC"
+        ).fetchall()
+        lines = [
+            "# Jarvis memory",
+            "",
+            "_A human-readable mirror of what Jarvis remembers. The source of truth is "
+            "`state.db` (the `facts` and `episodes` tables, keyword-searchable via FTS5); "
+            "this file is regenerated after every turn._",
+            "",
+            f"## Facts — semantic memory ({len(facts)})",
+            "",
+        ]
+        lines += [f"- **{f['subject']}** — {f['content']}" for f in facts] or ["_none yet_"]
+        lines += ["", f"## Episodes — episodic memory ({len(eps)})", ""]
+        lines += [f"- **{e['happened_at']}** — {e['summary']}" for e in eps] or ["_none yet_"]
+        (self.settings.home / "MEMORY.md").write_text("\n".join(lines) + "\n")
+
     def maybe_consolidate(self, notify=None) -> None:
         new_facts = consolidation.consolidate_if_due(
             self.conn,

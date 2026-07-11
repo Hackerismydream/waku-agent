@@ -401,16 +401,17 @@ function memOverview(d){
       <a class="reveal" onclick="location.hash='database'">Database tab</a> shows the exact same
       thing as raw SQLite tables (plus the FTS5 keyword index). Same
       <code>.jarvis/state.db</code> — different altitude.
-      <br><br>Some assistants (Hermes) keep memory as a single <code>MEMORY.md</code> file. Here it's
-      structured rows in <code>state.db</code> (facts + episodes tables) instead — so it's queryable and
-      keyword-searchable (FTS5), not just a text blob. Same idea, sturdier storage.</div></div>
+      <br><br>Some assistants (Hermes) keep memory as a single <code>MEMORY.md</code> file. Jarvis keeps
+      the queryable source in <code>state.db</code> (facts + episodes, FTS5-searchable) <b>and</b> writes a
+      human-readable ${reveal("MEMORY.md","MEMORY.md")} mirror after every turn — so you get both: a real file
+      you can open, backed by a sturdy database.</div></div>
     <h2>The three pillars</h2>
     <div class="tiles" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${pillars}</div>
     <h2>Retrieval gate — does this turn even need memory?</h2>${gateSplit(s)}
     <div class="meta" style="margin-top:8px">A cheap model decides <b>if</b> a turn needs memory at all, before any lookup —
       this is memory <i>retrieval</i>, the hero decision. (The Ops tab charts the same skip/retrieve
       numbers as an operational metric; the decision itself is memory's.)</div>
-    <div class="meta" style="margin-top:14px">Files: ${reveal("state.db","state.db")} · ${reveal("SOUL.md","SOUL.md")} · ${reveal("skills","skills/")}</div>`;
+    <div class="meta" style="margin-top:14px">Files: ${reveal("state.db","state.db")} · ${reveal("MEMORY.md","MEMORY.md")} · ${reveal("SOUL.md","SOUL.md")} · ${reveal("skills","skills/")}</div>`;
 }
 function memSemantic(d){
   let h = `<div class="meta" style="margin-bottom:12px">Durable facts distilled from what you tell Jarvis —
@@ -546,8 +547,9 @@ const VIEWS = {
   },
   overview(d){
     const s = d.stats;
+    const u = d.usage || {total_cost:0};
     const tiles = [
-        [money(s.cost),"spent (est)","money"],[secs(s.latency_avg),"avg turn",""],
+        [money(u.total_cost),"spent · all-time","money"],[secs(s.latency_avg),"avg turn",""],
         [s.turns,"turns",""],[s.tool_calls,"tool calls",""],
         [d.facts.length,"facts",""],[d.calendar.length,"events",""],
       ].map(([v,l,c])=>`<div class="tile"><b class="${c}">${v}</b><span>${l}</span></div>`).join("");
@@ -648,7 +650,8 @@ const VIEWS = {
       <b>Database vs Memory.</b> <span class="r">This is the raw persistence layer — the literal SQLite
       tables. The <a class="reveal" onclick="location.hash='memory'">Memory tab</a> is the friendly
       view of the same rows (facts, episodes, skills, persona). One file, two altitudes. Where Hermes
-      uses a <code>MEMORY.md</code> file, Jarvis uses these queryable tables instead.</span></div>`;
+      uses a <code>MEMORY.md</code> file, Jarvis uses these queryable tables — and mirrors them to a
+      readable <code>MEMORY.md</code> too.</span></div>`;
     h += `<div class="card">
       <div class="u" style="font-family:var(--mono);font-size:12.5px;word-break:break-all">${esc(db.path)}</div>
       <div class="meta">${kb} KB on disk · SQLite + FTS5 · open it yourself: <code>sqlite3 .jarvis/state.db</code></div>
@@ -665,11 +668,30 @@ const VIEWS = {
   },
   ops(d){
     const s = d.stats;
+    const u = d.usage || {calls:0,total_in:0,total_out:0,total_cost:0,by_day:[],by_provider:[]};
     let h = `<div class="tiles">${[
-        [money(s.cost),"spent (est)","money"],[s.tokens_in.toLocaleString(),"tokens in",""],
-        [s.tokens_out.toLocaleString(),"tokens out",""],[secs(s.latency_avg),"avg turn",""],
-        [secs(s.latency_p95),"p95 turn",""],[`${s.tool_errors}`,"tool errors",s.tool_errors?"":""],
+        [money(u.total_cost),"spent · all-time","money"],[u.total_in.toLocaleString(),"tokens in · all-time",""],
+        [u.total_out.toLocaleString(),"tokens out · all-time",""],[u.calls.toLocaleString(),"LLM calls",""],
+        [secs(s.latency_avg),"avg turn",""],[`${s.tool_errors}`,"tool errors",""],
       ].map(([v,l,c])=>`<div class="tile"><b class="${c}">${v}</b><span>${l}</span></div>`).join("")}</div>`;
+
+    h += `<h2>Spend <span class="meta" style="font-weight:400">· permanent ledger — survives a demo reset</span></h2>`;
+    h += `<div class="card"><span class="r">Every LLM call's tokens are logged to
+      <code>.jarvis/usage.jsonl</code> (append-only, never wiped). Dollar cost is estimated from tokens
+      × current pricing — the tokens are the ground truth. ${reveal("usage.jsonl","open usage.jsonl")}</span></div>`;
+    if ((u.by_provider||[]).length){
+      h += table(["provider","LLM calls","tokens in","tokens out","cost (est)"], u.by_provider.map(p =>
+        `<tr><td><code>${esc(p.provider)}</code></td><td class="meta">${p.calls}</td>
+          <td class="meta">${p.in.toLocaleString()}</td><td class="meta">${p.out.toLocaleString()}</td>
+          <td class="meta">${money(p.cost)}</td></tr>`));
+    }
+    if ((u.by_day||[]).length){
+      h += `<h2>Spend per day</h2>`;
+      h += table(["day","LLM calls","tokens in","tokens out","cost (est)"], u.by_day.map(r =>
+        `<tr><td class="meta">${esc(r.date)}</td><td class="meta">${r.calls}</td>
+          <td class="meta">${r.in.toLocaleString()}</td><td class="meta">${r.out.toLocaleString()}</td>
+          <td class="meta">${money(r.cost)}</td></tr>`));
+    }
 
     h += `<h2>Retrieval gate — which turns used memory</h2>${gateSplit(s)}`;
     const decided = d.turns.filter(t => t.gate);

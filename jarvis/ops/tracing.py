@@ -67,10 +67,25 @@ class Tracer:
         with self.path.open("a") as f:
             f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
+    def _record_usage(self, event: dict) -> None:
+        """Append one LLM call's token usage to a PERMANENT ledger (usage.jsonl).
+        Unlike traces (which can be reset for a clean demo), this is the running
+        record of what you've actually spent — never wiped, summarized per day on
+        the dashboard. Tokens are the ground truth; dollar cost is derived from
+        them (pricing can change), so we store tokens + provider/model."""
+        usage = event.get("usage", {})
+        record = {"ts": _now(), "provider": self.settings.provider,
+                  "model": self.settings.model or "", "kind": "loop",
+                  "in": usage.get("in", 0), "out": usage.get("out", 0)}
+        with (self.settings.home / "usage.jsonl").open("a") as f:
+            f.write(json.dumps(record) + "\n")
+
     # ---- the Observer: called by the loop for every llm/tool/gate/... event
     def event(self, kind: str, event: dict) -> None:
         if kind == "text":
             return  # streaming token deltas are for the live UI, not the trace
+        if kind == "llm":
+            self._record_usage(event)
         self._write({"type": kind, **event})
         if self._otel_tracer and self._span_ctx is not None:
             with self._otel_tracer.start_as_current_span(
