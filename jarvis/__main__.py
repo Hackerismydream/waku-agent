@@ -3,6 +3,7 @@
   python -m jarvis                       chat in the terminal (default)
   python -m jarvis voice                 talk to it (needs the [voice] extra)
   python -m jarvis telegram              phone → laptop (needs TELEGRAM_BOT_TOKEN)
+  python -m jarvis brief                 morning briefing (calendar + mail + memory)
   python -m jarvis skill install <url>   install a community skill
 """
 
@@ -25,6 +26,10 @@ def main() -> None:
         from jarvis.gateway.telegram import main as tg_main
 
         tg_main()
+    elif args[0] == "brief":
+        from jarvis.ops.brief import main as brief_main
+
+        brief_main()
     elif args[0] == "skill" and len(args) >= 3 and args[1] == "install":
         from jarvis.memory.procedural.installer import install
 

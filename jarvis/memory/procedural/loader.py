@@ -25,8 +25,8 @@ class Skill:
     path: Path
 
 
-def _parse(path: Path) -> Skill | None:
-    text = path.read_text()
+def _parse_text(text: str, path: Path) -> Skill | None:
+    """Validate SKILL.md content (used by the loader AND the create_skill tool)."""
     match = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.DOTALL)
     if not match:
         return None
@@ -40,24 +40,46 @@ def _parse(path: Path) -> Skill | None:
     return Skill(fields["name"], fields["description"], body.strip(), path)
 
 
+def _parse(path: Path) -> Skill | None:
+    return _parse_text(path.read_text(), path)
+
+
 class SkillLoader:
     """Scans skill directories: the repo's skills/ (built-in + community) and
-    JARVIS_HOME/skills (installed via `python -m jarvis skill install <url>`)."""
+    JARVIS_HOME/skills (installed or agent-authored). Re-scans automatically
+    when any SKILL.md changes, so a skill created mid-session is live next turn."""
 
     def __init__(self, dirs: list[Path]):
+        self.dirs = dirs
         self.skills: list[Skill] = []
-        for d in dirs:
+        self._sig: tuple = ()
+        self.refresh()
+
+    def _scan_sig(self) -> tuple:
+        sig = []
+        for d in self.dirs:
+            if d.is_dir():
+                for f in sorted(d.rglob("SKILL.md")):
+                    sig.append((str(f), f.stat().st_mtime))
+        return tuple(sig)
+
+    def refresh(self) -> None:
+        self.skills = []
+        for d in self.dirs:
             if not d.is_dir():
                 continue
             for f in sorted(d.rglob("SKILL.md")):
                 skill = _parse(f)
                 if skill:
                     self.skills.append(skill)
+        self._sig = self._scan_sig()
 
     def match(self, message: str, max_skills: int = 2) -> list[Skill]:
         """Transparent trigger: keyword overlap between the message and each
         skill's name+description. No embeddings, no magic — you can compute
         the score in your head."""
+        if self._scan_sig() != self._sig:   # a skill was added/edited — reload
+            self.refresh()
         msg_words = set(re.findall(r"[a-z0-9]{3,}", message.lower()))
         scored = []
         for skill in self.skills:

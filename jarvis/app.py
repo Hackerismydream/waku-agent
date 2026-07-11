@@ -23,15 +23,21 @@ class Jarvis:
         self.settings.ensure_home()
         self.conn = conn or connect(self.settings.home)
         self.client = client or get_client(self.settings)
-        self.tools = build_registry(self.conn, self.settings)
 
-        # Memory is deliberately unpluggable (memory=None): without it Jarvis
-        # still works, it just forgets — the "before" state the video contrasts.
+        # Memory first: the memory-management tools need it.
         from jarvis.memory import Memory
 
         self.memory = Memory(self.conn, self.settings, self.client)
+        self.tools = build_registry(self.conn, self.settings, self.memory)
+        self.mcp_bridge = getattr(self.tools, "mcp_bridge", None)
         self.session = Session(self.settings, memory=self.memory)
         self.tracer = Tracer(self.settings)
+
+    def close(self) -> None:
+        """Release external resources (MCP subprocesses). Called when the
+        dashboard rebuilds the agent after a settings change."""
+        if self.mcp_bridge is not None:
+            self.mcp_bridge.close()
 
     def respond(self, user_message: str, observer: Observer | None = None) -> LoopResult:
         """One full turn: assemble working memory → run the loop → persist.

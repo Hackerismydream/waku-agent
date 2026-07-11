@@ -49,6 +49,11 @@ class Settings:
     apple_calendar: bool = field(
         default_factory=lambda: os.getenv("JARVIS_APPLE_CALENDAR", "") in ("1", "true", "yes")
     )
+    # Give the agent read/write access to Apple Calendar, Mail, Reminders, Notes
+    # (macOS; first use triggers the system Automation permission prompts).
+    apple_tools: bool = field(
+        default_factory=lambda: os.getenv("JARVIS_APPLE_TOOLS", "") in ("1", "true", "yes")
+    )
 
     # --- Optional gateway
     telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))

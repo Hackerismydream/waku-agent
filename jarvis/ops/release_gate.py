@@ -11,6 +11,7 @@ Judge evals run when a key is present and report scores. Exit code 0 = ship.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -22,15 +23,23 @@ load_dotenv()  # the key check below must see .env, same as the app does
 REPO = Path(__file__).resolve().parents[2]
 
 
-def run(suite: str) -> int:
+def run(suite: str) -> tuple[int, dict]:
+    """Run a pytest suite; return (exit_code, {passed, failed}). Counts come
+    from the -q summary line — zero extra deps; 0/0 on a miss is honest."""
     print(f"\n=== {suite} ===")
-    return subprocess.call(
-        [sys.executable, "-m", "pytest", "-q", str(REPO / "evals" / suite)], cwd=REPO
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(REPO / "evals" / suite)],
+        cwd=REPO, capture_output=True, text=True,
     )
+    print(proc.stdout, end="")
+    print(proc.stderr, end="", file=sys.stderr)
+    counts = {k: (int(m.group(1)) if (m := re.search(rf"(\d+) {k}", proc.stdout)) else 0)
+              for k in ("passed", "failed")}
+    return proc.returncode, counts
 
 
-def report(deterministic: str, judge: str) -> None:
-    """Persist the verdict so the dashboard can show it."""
+def report(deterministic: str, judge: str, suites: dict | None = None) -> None:
+    """Persist the latest verdict AND append it to the run history."""
     from datetime import datetime, timezone
     import json
 
@@ -38,32 +47,37 @@ def report(deterministic: str, judge: str) -> None:
 
     settings = load_settings()
     settings.ensure_home()
-    (settings.home / "eval_report.json").write_text(json.dumps({
+    record = {
         "deterministic": deterministic,
         "judge": judge,
+        "suites": suites or {},
         "ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }))
+    }
+    (settings.home / "eval_report.json").write_text(json.dumps(record))
+    with (settings.home / "eval_runs.jsonl").open("a") as f:
+        f.write(json.dumps(record) + "\n")
 
 
 def main() -> None:
-    failed = run("deterministic")
-    if failed:
-        report("fail", "not run")
-        print("\n⛔ GATE CLOSED — deterministic evals failed. Fix before releasing.")
+    suites = {}
+    code, suites["deterministic"] = run("deterministic")
+    if code:
+        report("fail", "not run", suites)
+        print("\nGATE CLOSED — deterministic evals failed. Fix before releasing.")
         sys.exit(1)
 
     if os.getenv("ANTHROPIC_API_KEY"):
-        failed = run("judge")
-        if failed:
-            report("pass", "fail")
-            print("\n⛔ GATE CLOSED — judge scores below threshold.")
+        code, suites["judge"] = run("judge")
+        if code:
+            report("pass", "fail", suites)
+            print("\nGATE CLOSED — judge scores below threshold.")
             sys.exit(1)
-        report("pass", "pass")
+        report("pass", "pass", suites)
     else:
-        report("pass", "skipped")
+        report("pass", "skipped", suites)
         print("\n(judge suite skipped — no ANTHROPIC_API_KEY)")
 
-    print("\n✅ GATE OPEN — safe to release.")
+    print("\nGATE OPEN — safe to release.")
 
 
 if __name__ == "__main__":

@@ -39,6 +39,10 @@ voice = [
 supabase = [
     "supabase>=2.0",
 ]
+# Optional: connect MCP servers (.jarvis/mcp.json)
+mcp = [
+    "mcp>=1.0",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",

@@ -32,6 +32,9 @@ Rules:
   its artifact landed (local calendar file, Apple Calendar, memory database at
   .jarvis/state.db) — relay that truthfully, and never claim something synced
   anywhere the tool output doesn't say.
+- You can manage your own memory: use manage_memory to correct or forget facts,
+  update_soul to save a standing preference the user gives you, and create_skill
+  to save a repeatable workflow the user teaches you (only after they say yes).
 """
 
 

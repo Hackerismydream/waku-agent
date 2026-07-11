@@ -176,6 +176,16 @@ def collect() -> dict:
     if report_path.exists():
         eval_report = json.loads(report_path.read_text())
 
+    eval_history = []
+    hist_path = home / "eval_runs.jsonl"
+    if hist_path.exists():
+        for line in hist_path.read_text().splitlines()[-20:]:
+            try:
+                eval_history.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    eval_history.reverse()
+
     outbox = [{"name": p.name, "text": p.read_text()[:400]}
               for p in sorted((home / "outbox").glob("*.txt"), reverse=True)[:20]]
 
@@ -219,8 +229,9 @@ def collect() -> dict:
         },
         "turns": turns[::-1][:50],
         "wake_scans": wake_scans[::-1][:25],
-        "facts": rows("SELECT subject, content, source, created_at FROM facts ORDER BY id DESC"),
-        "episodes": rows("SELECT happened_at, summary FROM episodes ORDER BY happened_at DESC"),
+        "facts": rows("SELECT id, subject, content, source, created_at FROM facts ORDER BY id DESC"),
+        "episodes": rows("SELECT id, happened_at, summary FROM episodes ORDER BY happened_at DESC"),
+        "soul": (home / "SOUL.md").read_text() if (home / "SOUL.md").exists() else "",
         "chat_pending": conn.execute("SELECT COUNT(*) FROM chat_log WHERE consolidated=0").fetchone()[0],
         "chat_log": rows("SELECT role, content, consolidated, created_at FROM chat_log ORDER BY id DESC LIMIT 60")[::-1],
         "consolidate_every": settings.consolidate_every,
@@ -228,7 +239,9 @@ def collect() -> dict:
         "outbox": outbox,
         "skills": skills,
         "eval_report": eval_report,
+        "eval_history": eval_history,
         "db": db_info,
+        "settings": settings_info(),
     }
 
 
@@ -272,6 +285,101 @@ def reveal_path(rel: str) -> dict:
         check=False,
     )
     return {"ok": True, "revealed": str(target)}
+
+
+def memory_action(payload: dict) -> dict:
+    """Human CRUD on memory from the dashboard: update/delete facts & episodes,
+    rewrite SOUL.md. Writes the same sqlite file the agent uses (busy_timeout
+    covers contention); changes are live for the next agent turn."""
+    from jarvis.memory.episodic.store import SqliteEpisodeStore
+    from jarvis.memory.semantic.store import SqliteFactStore
+
+    settings = load_settings()
+    settings.ensure_home()
+    action = payload.get("action")
+    if action == "save_soul":
+        text = (payload.get("content") or "").strip()
+        if not text:
+            return {"error": "SOUL cannot be empty"}
+        (settings.home / "SOUL.md").write_text(text + "\n")
+        return {"ok": True}
+
+    conn = connect(settings.home)
+    facts, episodes = SqliteFactStore(conn), SqliteEpisodeStore(conn)
+    try:
+        rid = int(payload.get("id", 0))
+    except (TypeError, ValueError):
+        return {"error": "bad id"}
+    if action == "update_fact":
+        return {"ok": facts.update(rid, payload.get("content", ""), payload.get("subject") or None)}
+    if action == "delete_fact":
+        return {"ok": facts.delete(rid)}
+    if action == "delete_episode":
+        return {"ok": episodes.delete(rid)}
+    return {"error": f"unknown action {action}"}
+
+
+def settings_info() -> dict:
+    """Current provider/model + which keys are set — masked to last-4, never
+    the full key."""
+    from jarvis.loop.models import PROVIDERS
+
+    s = load_settings()
+    prov = PROVIDERS.get(s.provider)
+    return {
+        "provider": s.provider,
+        "model": s.model or (prov.model if prov else ""),
+        "small_model": s.small_model or (prov.small_model if prov else ""),
+        "providers": [
+            {"name": name, "key_env": p.key_env,
+             "key_set": bool(os.getenv(p.key_env)),
+             "key_last4": (os.getenv(p.key_env) or "")[-4:],
+             "default_model": p.model}
+            for name, p in PROVIDERS.items()
+        ],
+    }
+
+
+def apply_settings(payload: dict) -> dict:
+    """Write .env + os.environ, then rebuild the agent so the switch is live.
+    Never logs keys; only whitelisted env names are writable."""
+    global _agent
+    from dotenv import find_dotenv, set_key
+
+    from jarvis.loop.models import PROVIDERS
+
+    provider = payload.get("provider")
+    if provider not in PROVIDERS:
+        return {"error": f"unknown provider {provider}"}
+    writable = {"JARVIS_PROVIDER", "JARVIS_MODEL", "JARVIS_SMALL_MODEL"} | {p.key_env for p in PROVIDERS.values()}
+    env_path = find_dotenv(usecwd=True) or ".env"
+
+    updates = {"JARVIS_PROVIDER": provider,
+               "JARVIS_MODEL": payload.get("model", "") or "",
+               "JARVIS_SMALL_MODEL": payload.get("small_model", "") or ""}
+    for k, v in (payload.get("keys") or {}).items():
+        if k in writable and v:  # only non-empty keys overwrite
+            updates[k] = v
+    for k, v in updates.items():
+        if k in writable:
+            set_key(env_path, k, v)
+            os.environ[k] = v
+
+    with _agent_lock:
+        old = _agent
+        try:
+            new_settings = load_settings()
+            new_settings.ensure_home()
+            conn = connect(new_settings.home, check_same_thread=False)
+            from jarvis.app import Jarvis
+
+            _agent = Jarvis(settings=new_settings, conn=conn)
+        except (Exception, SystemExit) as exc:  # get_client raises SystemExit
+            _agent = old
+            return {"error": str(exc)}
+    if old is not None:
+        old.close()
+    return {"ok": True, **settings_info()}
 
 
 def events_since(cursor):
@@ -425,6 +533,16 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
   .dbcell{font-family:var(--mono);font-size:11.5px;color:var(--ink2);max-width:240px;overflow:hidden;text-overflow:ellipsis}
   .reveal{color:var(--accent);cursor:pointer;font-weight:500;border-bottom:1px dashed var(--accent);padding-bottom:1px}
   .reveal:hover{border-bottom-style:solid}
+  .reveal.del{color:var(--bad);border-color:var(--bad)}
+  .editor{width:100%;min-height:120px;background:var(--bg);border:1px solid var(--line2);border-radius:8px;
+          padding:10px 12px;color:var(--ink);font:13px/1.5 var(--mono);resize:vertical;outline:none}
+  .editor:focus{border-color:var(--accent)}
+  tr .editor{min-height:52px}
+  .save{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer}
+  .fld{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:12.5px;color:var(--ink2)}
+  .fld input,.fld select{background:var(--bg);border:1px solid var(--line2);border-radius:8px;padding:9px 12px;
+          color:var(--ink);font-size:13.5px;outline:none}
+  .fld input:focus,.fld select:focus{border-color:var(--accent)}
   .watchhead{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink2);font-weight:600;margin-bottom:8px}
   .chat-arch{max-width:600px;margin:0 auto 16px;border:1px solid var(--line);border-radius:12px;
              padding:8px;background:var(--panel);position:sticky;top:96px;z-index:3}
@@ -483,6 +601,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
   <a href="#tools" data-v="tools">Tools <span class="n" id="n-tools"></span></a>
   <a href="#database" data-v="database">state.db <span class="n" id="n-db"></span></a>
   <a href="#ops" data-v="ops">Ops <span class="n" id="n-ops"></span></a>
+  <a href="#settings" data-v="settings">Settings</a>
 </nav>
 <main>
   <header class="pagehead">
@@ -508,9 +627,49 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 const esc = s => (s??"").toString().replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 let D = null;
 
-// Click a section's data to open the real local file/folder in Finder.
+// Click a section's data to open the real local file/folder (editor or Finder).
 function revealFile(p){ fetch("/api/reveal?path=" + encodeURIComponent(p)); }
 const reveal = (path, label) => `<a class="reveal" onclick="revealFile('${path}')">${esc(label)}</a>`;
+
+// --- memory CRUD (dashboard side). `editing` pauses the 5s rebuild so an
+// in-progress edit isn't wiped (same idea as the animation guard).
+let editing = false;
+async function postJSON(url, body){ return (await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
+function editFact(id){
+  const row = document.getElementById("fact-"+id); if(!row) return;
+  editing = true;
+  const cell = row.querySelector(".fc"); const cur = cell.textContent;
+  cell.innerHTML = `<textarea class="editor" id="ef-${id}">${cur.replace(/</g,"&lt;")}</textarea>`;
+  const act = row.lastElementChild;
+  act.innerHTML = `<a class="reveal" onclick="saveFact(${id})">save</a> · <a class="reveal" onclick="editing=false;refresh()">cancel</a>`;
+  document.getElementById("ef-"+id).focus();
+}
+async function saveFact(id){
+  const v = document.getElementById("ef-"+id).value.trim();
+  await postJSON("/api/memory", {action:"update_fact", id, content:v});
+  editing = false; refresh();
+}
+async function delMem(action, id){
+  if(!confirm("Delete this from memory?")) return;
+  await postJSON("/api/memory", {action, id});
+  refresh();
+}
+async function saveSoul(){
+  const v = document.getElementById("soul").value;
+  const r = await postJSON("/api/memory", {action:"save_soul", content:v});
+  document.getElementById("soul-msg").textContent = r.error ? ("Error: "+r.error) : "Saved — live next turn.";
+}
+async function saveSettings(){
+  const provider = document.getElementById("set-provider").value;
+  const model = document.getElementById("set-model").value.trim();
+  const keys = {};
+  document.querySelectorAll("[data-key]").forEach(i => { if(i.value.trim()) keys[i.dataset.key] = i.value.trim(); });
+  document.getElementById("set-msg").textContent = "switching…";
+  const r = await postJSON("/api/settings", {provider, model, keys});
+  document.getElementById("set-msg").textContent = r.error ? ("Error: "+r.error) : "Switched to "+r.provider+" — live now.";
+  if(!r.error) refresh();
+}
+function markEditing(){ editing = true; }
 
 const money = n => "$" + (n < 0.01 ? n.toFixed(4) : n.toFixed(2));
 const secs = ms => ms==null ? "—" : (ms/1000).toFixed(1)+"s";
@@ -750,18 +909,44 @@ const VIEWS = {
     return h;
   },
   memory(d){
-    let h = `<h2>Semantic — durable facts</h2>`;
-    h += table(["subject","fact","source","when"], d.facts.map(f =>
-      `<tr><td><code>${esc(f.subject)}</code></td><td>${esc(f.content)}</td><td>${esc(f.source)}</td><td class="meta">${esc(f.created_at)}</td></tr>`));
+    let h = `<h2>Semantic — durable facts <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink3)">· edit or forget any of them</span></h2>`;
+    h += `<div class="card" style="padding:4px 8px"><table><tr><th>subject</th><th>fact</th><th>source</th><th></th></tr>${
+      d.facts.map(f => `<tr id="fact-${f.id}">
+        <td><code>${esc(f.subject)}</code></td>
+        <td class="fc">${esc(f.content)}</td>
+        <td class="meta">${esc(f.source)}</td>
+        <td style="white-space:nowrap"><a class="reveal" onclick="editFact(${f.id})">edit</a> · <a class="reveal del" onclick="delMem('delete_fact',${f.id})">delete</a></td>
+      </tr>`).join("")}</table></div>`;
     h += `<h2>Episodic — what happened, when</h2>`;
-    h += table(["date","episode"], d.episodes.map(e =>
-      `<tr><td class="meta">${esc(e.happened_at)}</td><td>${esc(e.summary)}</td></tr>`));
+    h += `<div class="card" style="padding:4px 8px"><table><tr><th>date</th><th>episode</th><th></th></tr>${
+      d.episodes.map(e => `<tr><td class="meta">${esc(e.happened_at)}</td><td>${esc(e.summary)}</td>
+        <td><a class="reveal del" onclick="delMem('delete_episode',${e.id})">delete</a></td></tr>`).join("")}</table></div>`;
+    h += `<h2>SOUL.md — who Jarvis is <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink3)">· its persona, editable</span></h2>`;
+    h += `<div class="card"><textarea id="soul" class="editor" onfocus="markEditing()">${esc(d.soul||"")}</textarea>
+      <div style="margin-top:8px"><button class="save" onclick="saveSoul()">Save SOUL.md</button>
+      <span class="meta" id="soul-msg" style="margin-left:10px"></span></div></div>`;
     h += `<h2>Consolidation</h2><div class="card">${d.chat_pending} unconsolidated message(s).
           The summarizer distills chats into facts + an episode every ${d.consolidate_every} exchanges.</div>`;
     h += `<h2>Procedural — loaded skills</h2>`;
     h += table(["skill","when it triggers"], d.skills.map(s =>
       `<tr><td><code>${esc(s.name)}</code></td><td>${esc(s.description)}</td></tr>`));
-    h += `<div class="meta" style="margin-top:12px">All of this lives in <code>.jarvis/state.db</code> and <code>.jarvis/SOUL.md</code> — ${reveal("state.db","reveal state.db")} · ${reveal("SOUL.md","reveal SOUL.md")} · ${reveal("skills","open the skills folder")}</div>`;
+    h += `<div class="meta" style="margin-top:12px">All of this lives in <code>.jarvis/state.db</code> and <code>.jarvis/SOUL.md</code> — ${reveal("state.db","open state.db")} · ${reveal("SOUL.md","open SOUL.md")} · ${reveal("skills","open the skills folder")}</div>`;
+    return h;
+  },
+  settings(d){
+    const st = d.settings || {providers:[]};
+    let h = `<div class="card">Current: <b>${esc(st.provider)}</b> · model <code>${esc(st.model)}</code> · gate model <code>${esc(st.small_model)}</code></div>`;
+    h += `<h2>Provider &amp; keys (BYOK)</h2><div class="card">
+      <label class="fld">Provider
+        <select id="set-provider" onfocus="markEditing()">${st.providers.map(p=>`<option value="${p.name}" ${p.name===st.provider?"selected":""}>${p.name} (default ${esc(p.default_model)})</option>`).join("")}</select></label>
+      <label class="fld">Model override <input id="set-model" placeholder="blank = provider default" value="${st.model===st.providers.find(p=>p.name===st.provider)?.default_model?"":esc(st.model)}"></label>
+      <div class="meta" style="margin:10px 0 4px">Keys stay in your local <code>.env</code> — never sent back to this page (only the last 4 shown).</div>
+      ${st.providers.map(p=>`<label class="fld"><span>${p.name} key <span class="meta">(${p.key_env})</span></span>
+        <input type="password" data-key="${p.key_env}" placeholder="${p.key_set?`set · ends in ····${esc(p.key_last4)}`:"not set"}"></label>`).join("")}
+      <div style="margin-top:12px"><button class="save" onclick="saveSettings()">Save &amp; switch</button>
+        <span class="meta" id="set-msg" style="margin-left:10px"></span></div>
+      <div class="meta" style="margin-top:10px">Note: running terminal / voice / Telegram gateways keep their old provider until restarted.</div>
+    </div>`;
     return h;
   },
   tools(d){
@@ -811,6 +996,16 @@ const VIEWS = {
         <span class="pill ${d.eval_report.judge==="pass"?"pass":d.eval_report.judge==="fail"?"fail":"skip"}" style="margin-left:8px">llm-judge · ${d.eval_report.judge}</span>
         <div class="meta">last run ${esc(d.eval_report.ran_at)} — refresh with <code>make gate</code></div></div>`
       : `<div class="card empty">no eval report yet — run <code>make gate</code></div>`;
+
+    if ((d.eval_history||[]).length){
+      const cnt = s => s ? `${s.passed||0} pass · ${s.failed||0} fail` : "—";
+      h += `<h2>Eval history</h2>`;
+      h += table(["when","deterministic","llm-judge","counts"], d.eval_history.map(r =>
+        `<tr><td class="meta">${esc((r.ran_at||"").replace("T"," ").slice(0,19))}</td>
+         <td><span class="pill ${r.deterministic}">${esc(r.deterministic)}</span></td>
+         <td><span class="pill ${r.judge==="pass"?"pass":r.judge==="fail"?"fail":"skip"}">${esc(r.judge)}</span></td>
+         <td class="meta">det ${cnt(r.suites&&r.suites.deterministic)} · judge ${cnt(r.suites&&r.suites.judge)}</td></tr>`));
+    }
 
     h += `<h2>Slowest turns</h2>`;
     const slow = [...d.turns].filter(t=>t.latency_ms!=null).sort((a,b)=>b.latency_ms-a.latency_ms).slice(0,6);
@@ -892,7 +1087,10 @@ function render(){
   } else if (view === "overview"){
     // don't rebuild mid-animation or the glowing SVG gets wiped
     if (activeView !== "overview" || !animating){ document.getElementById("view").innerHTML = VIEWS.overview(D); }
+  } else if ((view === "memory" || view === "settings") && editing && activeView === view){
+    // don't wipe an in-progress edit on the 5s refresh
   } else {
+    editing = false;
     document.getElementById("view").innerHTML = VIEWS[view](D);
   }
   activeView = view;
@@ -948,16 +1146,20 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(PAGE.encode(), "text/html; charset=utf-8")
 
-    def do_POST(self):  # noqa: N802 — browser gateway: run a real turn
-        if self.path != "/api/chat":
+    def do_POST(self):  # noqa: N802 — local write endpoints
+        routes = {"/api/chat": None, "/api/memory": memory_action, "/api/settings": apply_settings}
+        if self.path not in routes:
             self.send_response(404)
             self.end_headers()
             return
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length) or "{}")
-        message = (payload.get("message") or "").strip()
         try:
-            out = chat(message) if message else {"error": "empty message"}
+            if self.path == "/api/chat":
+                message = (payload.get("message") or "").strip()
+                out = chat(message) if message else {"error": "empty message"}
+            else:
+                out = routes[self.path](payload)
         except Exception as exc:  # surface, don't 500 — the browser shows it
             out = {"error": f"{type(exc).__name__}: {exc}"}
         self._send(json.dumps(out, default=str).encode(), "application/json")

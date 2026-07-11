@@ -147,6 +147,48 @@ make telegram
 Text your bot from anywhere and your laptop runs the turn — long-polling, so no
 public URL or webhook. Set `TELEGRAM_ALLOWED_USER` to lock it to just you.
 
+## Brief me on my week (Apple Calendar + Mail)
+
+```bash
+JARVIS_APPLE_TOOLS=1 make brief      # macOS; grant the permission prompts once
+```
+
+Jarvis reads your **real** Calendar.app (including events invited by email) and
+recent Apple Mail, cross-references your memory, and writes a focus-first briefing
+with clickable `message://` links. Cron it for a morning greeting:
+
+```
+30 7 * * *  cd ~/launch-jarvis && make brief
+```
+
+It runs through the normal harness, so it animates on the dashboard like any turn.
+
+## It manages its own memory
+
+The agent has tools to keep itself useful — no black box:
+- **manage_memory** — correct or forget a fact when you say it's wrong.
+- **update_soul** — save a standing preference you give it (lives in `SOUL.md`).
+- **create_skill** — when you teach it a repeatable workflow, it offers to save it
+  as a skill (written to `.jarvis/skills/`, live the same session).
+
+You can also edit any of this by hand on the dashboard's Memory tab (edit/delete
+facts, rewrite `SOUL.md`) or in Settings (switch provider/model, paste keys — BYOK,
+kept in your local `.env`, never sent to the browser).
+
+## Connect MCP servers
+
+```bash
+pip install -e '.[mcp]'
+```
+
+Create `.jarvis/mcp.json` and any Model Context Protocol server's tools appear to
+the agent, namespaced `<server>_<tool>`:
+
+```json
+{"servers": [{"name": "fs", "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]}]}
+```
+
 ## Add skills — yours or the community's
 
 Skills are procedural memory: markdown instructions loaded only when relevant.
@@ -167,6 +209,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 | `make dashboard` | the live cockpit at localhost:7777 |
 | `make voice` | talk to it (push-to-talk or wake word) |
 | `make telegram` | message it from your phone |
+| `make brief` | morning briefing from Calendar + Mail + memory |
 | `make trace` | deep trace waterfalls (Phoenix) at localhost:6006 |
 | `make eval` | deterministic evals (0/1, no judge) |
 | `make eval-judge` | LLM-as-judge evals (scored %) |
