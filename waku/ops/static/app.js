@@ -1,4 +1,54 @@
 const esc = s => (s??"").toString().replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+// --- tiny markdown renderer for chat replies (no dependency, XSS-safe: we
+// escape first, then apply a small set of transforms the LLM actually uses:
+// bold/italic/code, links, ordered/unordered lists, and tables).
+function mdInline(s){   // s is already HTML-escaped
+  return s
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|message:\/\/[^\s)]+)\)/g,
+             (m, text, url) => `<a href="${url}" target="_blank" rel="noopener">${text}</a>`)
+    .replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*_`])[*_]([^*_`\s][^*_`]*?)[*_](?![\w*])/g, "$1<em>$2</em>")
+    .replace(/`([^`]+?)`/g, "<code>$1</code>");
+}
+function renderMarkdown(text){
+  const lines = esc(text).split(/\r?\n/);
+  const row = l => /^\s*\|.*\|\s*$/.test(l);
+  const sep = l => /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(l);
+  const cells = l => l.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+  const out = [];
+  let i = 0;
+  while (i < lines.length){
+    const l = lines[i];
+    if (row(l) && i+1 < lines.length && sep(lines[i+1])){          // table
+      const head = cells(l); i += 2; const body = [];
+      while (i < lines.length && row(lines[i])){ body.push(cells(lines[i])); i++; }
+      out.push(`<table class="mdtable"><thead><tr>${head.map(h=>`<th>${mdInline(h)}</th>`).join("")}</tr></thead><tbody>${
+        body.map(r=>`<tr>${r.map(c=>`<td>${mdInline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+      continue;
+    }
+    const h = l.match(/^\s*#{1,6}\s+(.*)$/);
+    if (h){ out.push(`<div class="mdh">${mdInline(h[1])}</div>`); i++; continue; }
+    if (/^\s*[-*]\s+/.test(l)){                                     // unordered list
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])){ items.push(mdInline(lines[i].replace(/^\s*[-*]\s+/,""))); i++; }
+      out.push(`<ul class="mdlist">${items.map(x=>`<li>${x}</li>`).join("")}</ul>`); continue;
+    }
+    if (/^\s*\d+\.\s+/.test(l)){                                    // ordered list
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])){ items.push(mdInline(lines[i].replace(/^\s*\d+\.\s+/,""))); i++; }
+      out.push(`<ol class="mdlist">${items.map(x=>`<li>${x}</li>`).join("")}</ol>`); continue;
+    }
+    if (/^\s*$/.test(l)){ i++; continue; }
+    const para = [];                                                // paragraph
+    while (i < lines.length && lines[i].trim() && !/^\s*[-*]\s|^\s*\d+\.\s|^\s*#{1,6}\s/.test(lines[i])
+           && !(row(lines[i]) && i+1<lines.length && sep(lines[i+1]))){
+      para.push(mdInline(lines[i])); i++;
+    }
+    out.push(`<div class="mdp">${para.join("<br>")}</div>`);
+  }
+  return out.join("");
+}
 let D = null;
 
 // Click a section's data to open the real local file/folder (editor or Finder).
@@ -74,7 +124,7 @@ const turnCard = t => `<div class="card">
   <div class="u">${esc(t.user_message)}</div>
   <div class="meta" style="margin-top:4px">${gateBadge(t.gate)}</div>
   ${(t.tools||[]).map(toolRow).join("")}
-  <div class="r">${esc(t.reply)}</div>
+  <div class="r">${renderMarkdown(t.reply)}</div>
   <div class="meta">${esc((t.ts||"").replace("T"," ").slice(0,19))} · ${secs(t.latency_ms)} · ${t.iterations??"?"} iter · ${money(t.cost||0)}${t.consolidation?` · consolidated ${t.consolidation.new_facts} fact(s)`:""}</div>
 </div>`;
 
@@ -104,7 +154,7 @@ const chatTurnCard = t => `<div class="card">
   ${t.gate?`<div class="stages"><span class="stage done">gate · ${esc(t.gate.decision)}</span>${(t.tools||[]).map(x=>`<span class="stage done">tool · ${esc(x.tool)}</span>`).join("")}<span class="stage done">reply</span></div>
     <div class="meta" style="margin:0 0 6px">${esc(t.gate.reason||"")}</div>`:""}
   ${(t.tools||[]).map(toolRow).join("")}
-  <div class="r" style="margin-top:8px">${esc(t.reply)}</div>
+  <div class="r" style="margin-top:8px">${renderMarkdown(t.reply)}</div>
   <div class="meta">${secs(t.latency_ms)} · ${t.iterations??"?"} iter${t.consolidation?` · consolidated ${t.consolidation.new_facts} fact(s)`:""}</div>
 </div>`;
 
@@ -119,7 +169,7 @@ const streamingCard = m => `<div class="card">
   ${m.gate&&m.gate.reason?`<div class="meta" style="margin:0 0 6px">${esc(m.gate.reason)}</div>`:""}
   ${(m.tools||[]).map(toolRow).join("")}
   ${m.stream
-     ? `<div class="r" style="margin-top:8px">${esc(m.stream)}<span class="caret"></span></div>`
+     ? `<div class="r" style="margin-top:8px">${renderMarkdown(m.stream)}<span class="caret"></span></div>`
      : `<div class="meta" style="margin:0">thinking&hellip;</div>`}
 </div>`;
 
@@ -127,7 +177,7 @@ const streamingCard = m => `<div class="card">
 // latency/iteration data, and their stored form carries an internal
 // "[tools used: ...]" annotation — strip both so the thread reads cleanly.
 const stripTools = t => (t || "").replace(/\s*\[tools used:[\s\S]*\]\s*$/, "").trim();
-const historicalCard = m => `<div class="card"><div class="r">${esc(stripTools(m.reply))}</div></div>`;
+const historicalCard = m => `<div class="card"><div class="r">${renderMarkdown(stripTools(m.reply))}</div></div>`;
 
 function renderChatLog(){
   if (!CHAT.length)
