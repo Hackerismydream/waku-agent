@@ -803,8 +803,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-
-    base = int(os.getenv("JARVIS_DASHBOARD_PORT", str(PORT)))
+    # Port precedence: JARVIS_DASHBOARD_PORT, then the conventional PORT (used by
+    # deploy platforms and IDE preview panes), then 7777. If it's taken, walk on.
+    base = int(os.getenv("JARVIS_DASHBOARD_PORT") or os.getenv("PORT") or PORT)
     for port in range(base, base + 10):  # walk past a busy port instead of crashing
         try:
             server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
