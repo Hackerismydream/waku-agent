@@ -198,6 +198,24 @@
   .sessbtn:hover{border-color:var(--accent);color:var(--accent)}
   .sessmenu{position:absolute;z-index:30;background:var(--panel);border:1px solid var(--line2);border-radius:10px;
             box-shadow:0 8px 30px rgba(0,0,0,.28);width:300px;max-height:340px;overflow-y:auto;padding:6px}
+  /* mini model switcher: a pill in the chat header + its dropdown */
+  .modelchip{margin-left:auto;display:inline-flex;align-items:center;gap:6px;max-width:150px;
+             background:var(--accent-soft);border:1px solid var(--line2);border-radius:99px;
+             color:var(--ink);padding:4px 9px;font-size:12px;cursor:pointer;line-height:1.2}
+  .modelchip:hover{border-color:var(--accent)}
+  .modelchip .mc-dot{width:6px;height:6px;border-radius:99px;background:var(--good);flex-shrink:0}
+  .modelchip .mc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                      font-family:var(--mono);font-size:11px}
+  .modelchip .mc-caret{color:var(--ink3);font-size:9px;flex-shrink:0}
+  .modelmenu{width:250px}
+  .modelmenu .mm-h{font-size:10.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em;padding:5px 10px 4px}
+  .modelmenu .mm-load{padding:8px 10px;color:var(--ink3);font-size:12px}
+  .modelmenu .mm-id{font-family:var(--mono);font-size:12px}
+  .modelmenu .mm-free{font-size:9.5px;color:var(--good);border:1px solid var(--good);border-radius:99px;
+                      padding:0 5px;margin-left:6px;vertical-align:1px}
+  .modelmenu .mm-f{font-size:11px;color:var(--ink3);padding:8px 10px 4px;border-top:1px solid var(--line);margin-top:4px}
+  .modelmenu .mm-f code{font-size:11px;background:none;padding:0}
+  .modelmenu .mm-f a{color:var(--accent);text-decoration:none}
   .sessitem{padding:8px 10px;border-radius:7px;cursor:pointer;font-size:12.5px}
   .sessitem:hover{background:var(--accent-soft)}
   .sessitem.on{background:var(--accent-soft);color:var(--accent)}

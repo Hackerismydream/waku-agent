@@ -603,7 +603,51 @@ function toggleSessMenu(ev){
 document.addEventListener("click", e => {
   const m = document.getElementById("sessmenu");
   if (m && !m.contains(e.target)) closeSessMenu();
+  const mm = document.getElementById("modelmenu");
+  const chip = document.getElementById("modelchip");
+  if (mm && !mm.contains(e.target) && e.target !== chip && !chip?.contains(e.target)) closeModelMenu();
 });
+
+// --- mini model switcher in the chat dock: a pill showing the current brain,
+// clicking it drops the live catalog to swap without leaving the conversation.
+// Reuses switchModel() (the same /api/settings path the Settings page uses).
+function syncModelChip(){
+  const el = document.getElementById("modelchip");
+  if (!el || !D || !D.settings) return;
+  const st = D.settings;
+  el.innerHTML = `<span class="mc-dot"></span><span class="mc-name">${esc(st.model || st.provider || "model")}</span><span class="mc-caret">&#9662;</span>`;
+}
+function closeModelMenu(){ const m = document.getElementById("modelmenu"); if (m) m.remove(); }
+async function toggleModelMenu(ev){
+  ev.stopPropagation();
+  if (document.getElementById("modelmenu")){ closeModelMenu(); return; }
+  const st = (D && D.settings) || {};
+  const menu = document.createElement("div");
+  menu.className = "sessmenu modelmenu"; menu.id = "modelmenu";
+  menu.innerHTML = `<div class="mm-h">Model &middot; ${esc(st.provider || "")}</div><div class="mm-load">loading catalog&hellip;</div>`;
+  const r = ev.currentTarget.getBoundingClientRect();
+  menu.style.top = (r.bottom + 6) + "px";
+  menu.style.left = Math.max(8, r.right - 250) + "px";
+  document.body.appendChild(menu);
+  let data;
+  try { data = await (await fetch("/api/models")).json(); }
+  catch(e){ menu.innerHTML = `<div class="mm-h">couldn't load models</div>`; return; }
+  if (!document.getElementById("modelmenu")) return;   // closed while loading
+  const cur = data.model;
+  const items = (data.models || []).map(m =>
+    `<div class="sessitem ${m.id===cur?"on":""}" onclick="pickModel('${esc(m.id)}')">
+       <span class="mm-id">${esc(m.id)}</span>${m.free?'<span class="mm-free">free</span>':""}</div>`
+  ).join("") || `<div class="sessitem">no catalog — type a model id in Settings</div>`;
+  menu.innerHTML = `<div class="mm-h">Model &middot; ${esc(st.provider || "")}</div>${items}`
+    + `<div class="mm-f">gate: <code>${esc(data.small_model || "—")}</code>`
+    + ` &middot; <a href="#settings" onclick="closeModelMenu()">provider &amp; keys &rsaquo;</a></div>`;
+}
+async function pickModel(id){
+  const el = document.getElementById("modelchip");
+  closeModelMenu();
+  if (el) el.querySelector(".mc-name") && (el.querySelector(".mc-name").textContent = "switching…");
+  await switchModel(id);   // posts /api/settings + refresh(); syncModelChip runs on refresh
+}
 // --- read-only SQL console (item: "a simple query editor like Supabase")
 function qFill(sql){ const b=document.getElementById("sqlbox"); if(b){ b.value=sql; runQuery(); } }
 async function runQuery(){
@@ -1105,6 +1149,7 @@ async function refresh(){
   try {
     D = await (await fetch("/api/data")).json(); lastFetch = Date.now();
     render(); tickLive();
+    syncModelChip();  // keep the dock's model pill in sync with the active brain
     syncLiveView();   // live-update an opened conversation (e.g. new phone messages)
     if (!dockRestored) restoreDock();
   } catch(e){ /* server restarting — keep showing last data */ }
