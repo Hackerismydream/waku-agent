@@ -689,11 +689,13 @@ _models_cache: dict[str, tuple[float, list]] = {}
 
 
 def list_models() -> dict:
-    """Model ids available on the ACTIVE endpoint, for the settings model
-    picker. OpenAI-compatible endpoints (OpenRouter, Gemini, any WAKU_BASE_URL)
-    expose GET {base_url}/models; native-wire providers just offer their two
-    defaults. OpenRouter entries carry free / tool-support / context metadata
-    so the picker can surface the $0 tool-capable models. Cached 5 minutes."""
+    """Model ids available on the ACTIVE provider, for the settings model
+    picker — the defaults are starting points, never the menu. Three sources:
+    an explicit Provider.catalog_url (anthropic, kimi), GET {base_url}/models
+    on OpenAI-compatible endpoints (OpenRouter, Gemini, any WAKU_BASE_URL), or
+    the two known defaults when no catalog exists. OpenRouter entries carry
+    free / tool-support / context metadata so the picker can surface the $0
+    tool-capable models. Cached 5 minutes."""
     import time
     import urllib.request
 
@@ -707,18 +709,29 @@ def list_models() -> dict:
         "small_model": s.small_model or (prov.small_model if prov else ""),
         "endpoint": base or s.provider,
     }
-    if prov is None or prov.kind != "openai" or not base:
-        # no listing API on the anthropic wire: offer the known defaults
+    # Where can this provider's models be listed? An explicit catalog_url wins
+    # (kimi chats on the anthropic wire but lists on its OpenAI-compatible API;
+    # anthropic itself has GET /v1/models); otherwise openai-wire endpoints get
+    # {base_url}/models; otherwise fall back to the two known defaults.
+    if prov is not None and prov.catalog_url:
+        url = prov.catalog_url
+    elif prov is not None and prov.kind == "openai" and base:
+        url = base.rstrip("/") + "/models"
+    else:
         known = dict.fromkeys([out["model"], out["small_model"]]
                               + ([prov.model, prov.small_model] if prov else []))
         return {**out, "listed": False, "models": [{"id": m} for m in known if m]}
 
-    url = base.rstrip("/") + "/models"
     cached = _models_cache.get(url)
     if cached and time.time() - cached[0] < 300:
         return {**out, "listed": True, "models": cached[1]}
     key = s.api_key or os.getenv(prov.key_env, "")
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
+    # send both auth styles — Bearer for OpenAI-compatible catalogs, x-api-key +
+    # version for Anthropic's; each server reads the header it knows
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {key}",
+        "x-api-key": key, "anthropic-version": "2023-06-01",
+    })
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())

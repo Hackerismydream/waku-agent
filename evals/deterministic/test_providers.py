@@ -60,7 +60,8 @@ def test_dashboard_pricing_covers_every_provider(name):
 
 
 @pytest.mark.parametrize("name", [n for n, p in PROVIDERS.items()
-                                  if p.kind == "anthropic" or not p.base_url])
+                                  if p.catalog_url is None
+                                  and (p.kind == "anthropic" or not p.base_url)])
 def test_model_listing_falls_back_without_a_catalog(name, monkeypatch):
     """Providers with no listable catalog still give the picker their defaults
     (and never make a network call to get them)."""
@@ -73,6 +74,43 @@ def test_model_listing_falls_back_without_a_catalog(name, monkeypatch):
     assert result["listed"] is False
     ids = [m["id"] for m in result["models"]]
     assert PROVIDERS[name].model in ids
+
+
+def test_catalog_url_is_used_with_both_auth_styles(monkeypatch):
+    """kimi chats on the anthropic wire but LISTS models on its OpenAI-compat
+    endpoint — catalog_url must win, carrying both auth header styles, so the
+    picker offers the real menu instead of two hardcoded defaults."""
+    import io
+    import json
+    import urllib.request
+
+    from waku.ops import dashboard
+
+    captured = {}
+
+    def fake_urlopen(req, timeout=10):
+        captured["url"] = req.full_url
+        captured["headers"] = {k.lower(): v for k, v in req.header_items()}
+        body = io.BytesIO(json.dumps(
+            {"data": [{"id": "kimi-k3"}, {"id": "kimi-k2.7"}, {"id": "kimi-k1.5"}]}
+        ).encode())
+        body.__enter__ = lambda *a: body
+        body.__exit__ = lambda *a: None
+        return body
+
+    monkeypatch.setenv("WAKU_PROVIDER", "kimi")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "fake-key-for-tests")
+    monkeypatch.delenv("WAKU_MODEL", raising=False)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    dashboard._models_cache.clear()
+
+    result = dashboard.list_models()
+    assert captured["url"] == PROVIDERS["kimi"].catalog_url
+    assert captured["headers"]["authorization"] == "Bearer fake-key-for-tests"
+    assert captured["headers"]["x-api-key"] == "fake-key-for-tests"
+    assert result["listed"] is True
+    assert "kimi-k3" in [m["id"] for m in result["models"]]
+    dashboard._models_cache.clear()
 
 
 def test_price_for_layers_model_over_provider():

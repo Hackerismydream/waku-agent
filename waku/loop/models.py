@@ -32,11 +32,18 @@ class Provider:
     base_url: str | None
     model: str       # default main model (the loop)
     small_model: str  # default cheap model (retrieval gate + consolidation)
+    # Where to LIST this provider's models (the Settings picker). openai-wire
+    # providers get {base_url}/models automatically; set this for providers
+    # whose chat endpoint and catalog endpoint differ (e.g. kimi talks the
+    # anthropic wire but lists models on its OpenAI-compatible API). The
+    # defaults above are just starting points — any listed model is one click.
+    catalog_url: str | None = None
 
 
 PROVIDERS: dict[str, Provider] = {
     "anthropic": Provider("anthropic", "ANTHROPIC_API_KEY", None,
-                          "claude-sonnet-5", "claude-haiku-4-5-20251001"),
+                          "claude-sonnet-5", "claude-haiku-4-5-20251001",
+                          catalog_url="https://api.anthropic.com/v1/models"),
     "openai":    Provider("openai", "OPENAI_API_KEY", None,
                           "gpt-5.6", "gpt-5.6-luna"),
     # one key, every lab's models, and a $0 tier: the default models below are
@@ -51,8 +58,12 @@ PROVIDERS: dict[str, Provider] = {
                           "deepseek-v4-pro", "deepseek-v4-pro"),
     "minimax":   Provider("anthropic", "MINIMAX_API_KEY", "https://api.minimaxi.com/anthropic",
                           "MiniMax-M3", "MiniMax-M2"),
+    # K3 is the flagship default; the gate/summarizer stays on cheap K2.6
+    # (the live catalog has no plain "kimi-k2.7" — only -code variants; we
+    # checked). Override with WAKU_SMALL_MODEL=kimi-k3 if your key is K3-only.
     "kimi":      Provider("anthropic", "MOONSHOT_API_KEY", "https://api.moonshot.ai/anthropic",
-                          "kimi-k2.7", "kimi-k2.7"),
+                          "kimi-k3", "kimi-k2.6",
+                          catalog_url="https://api.moonshot.ai/v1/models"),
     "glm":       Provider("anthropic", "ZHIPU_API_KEY", "https://api.z.ai/api/anthropic",
                           "glm-5.2", "glm-5-turbo"),
 }
