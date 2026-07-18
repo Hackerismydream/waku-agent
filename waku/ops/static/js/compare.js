@@ -163,14 +163,15 @@ VIEWS.compare = function(d){
                      cost:    r => r.cost_usd || 0,
                      tokens:  r => (r.tokens_in || 0) + (r.tokens_out || 0) };
     const key = metric[compareState.sortBy] || metric.latency;
-    const sorters = [["latency", "fastest"], ["cost", "cheapest"], ["tokens", "fewest tokens"]];
-    const sortBar = `sort by ${sorters.map(([k, label]) =>
-      `<a class="cmp-sort ${compareState.sortBy === k ? "on" : ""}" onclick="setCompareSort('${k}')">${label}</a>`).join(" · ")}`;
+    const sorters = [["latency", "seconds"], ["tokens", "tokens"], ["cost", "money"]];
+    // Prominent, tab-like sort buttons — the selected one is highlighted.
+    const sortBar = done.length ? `<div class="cmp-sortbar">sort by ${sorters.map(([k, label]) =>
+      `<button class="cmp-sortbtn ${compareState.sortBy === k ? "on" : ""}" onclick="setCompareSort('${k}')">${label}</button>`).join("")}</div>` : "";
     const summary = done.length
       ? `Isolated temp runs — nothing saved to your data.
          Fastest: <b>${secs(Math.min(...done.map(r=>r.latency_ms)))}</b> ·
          Cheapest: <b>${money(Math.min(...done.map(r=>r.cost_usd||0)))}</b>
-         · ${done.length}/${order.length} done &nbsp;·&nbsp; ${sortBar}`
+         · ${done.length}/${order.length} done`
       : `Racing ${order.length} models in isolated sandboxes — watch each column think and act live.`;
     // Rank finished models first (by the chosen metric), then still-running,
     // then errors — so as the race resolves, the best rises to the top-left.
@@ -188,7 +189,7 @@ VIEWS.compare = function(d){
       return `<div class="cmp-col"><div class="cmp-h"><span class="mm-prov">${esc(s.split(":")[0])}</span> <code>${esc(s.split(":").slice(1).join(":"))}</code></div>
         <div class="meta">racing… <span class="caret"></span></div></div>`;
     }).join("");
-    grid = `<div class="meta" style="margin:2px 0 8px">${summary}</div><div class="cmp-grid">${cols}</div>`
+    grid = `<div class="meta" style="margin:2px 0 6px">${summary}</div>${sortBar}<div class="cmp-grid">${cols}</div>`
       + (compareState.raceError ? `<div class="meta" style="color:var(--bad)">${esc(compareState.raceError)}</div>` : "");
   }
 
