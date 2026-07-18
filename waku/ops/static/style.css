@@ -329,6 +329,7 @@
   .chip.money{color:var(--good);border-color:var(--good)}
   .chip.sorted{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);font-weight:600}
   .cmp-reply{margin-top:2px;font-size:13px;max-height:340px;overflow-y:auto}
+  .cmp-race{padding:5px 14px;font-size:12.5px}
   .cmp-sortbar{display:flex;align-items:center;gap:6px;margin:2px 0 12px;font-size:12px;color:var(--ink3)}
   .cmp-sortbtn{cursor:pointer;font-size:12px;color:var(--ink2);background:var(--bg);
        border:1px solid var(--line2);border-radius:99px;padding:3px 12px}

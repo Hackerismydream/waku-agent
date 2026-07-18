@@ -202,12 +202,11 @@ VIEWS.compare = function(d){
     // Prominent, tab-like sort buttons — the selected one is highlighted.
     const sortBar = done.length ? `<div class="cmp-sortbar">sort by ${sorters.map(([k, label]) =>
       `<button class="cmp-sortbtn ${compareState.sortBy === k ? "on" : ""}" onclick="setCompareSort('${k}')">${label}</button>`).join("")}</div>` : "";
-    const summary = done.length
-      ? `Isolated temp runs — nothing saved to your data.
-         Fastest: <b>${secs(Math.min(...done.map(r=>r.latency_ms)))}</b> ·
-         Cheapest: <b>${money(Math.min(...done.map(r=>r.cost_usd||0)))}</b>
-         · ${done.length}/${order.length} done`
-      : `Racing ${order.length} models in isolated sandboxes — watch each column think and act live.`;
+    // Only a progress line while the race is still running; once every column is
+    // in, the sort tabs + cards + scoreboard say it all (no redundant summary).
+    const summary = done.length < order.length
+      ? `Racing ${order.length} models — ${done.length}/${order.length} done`
+      : "";
     // Rank finished models first (by the chosen metric), then still-running,
     // then errors — so as the race resolves, the best rises to the top-left.
     const rank = s => {
@@ -224,7 +223,7 @@ VIEWS.compare = function(d){
       return `<div class="cmp-col"><div class="cmp-h"><span class="mm-prov">${esc(s.split(":")[0])}</span> <code>${esc(s.split(":").slice(1).join(":"))}</code></div>
         <div class="meta">racing… <span class="caret"></span></div></div>`;
     }).join("");
-    grid = `<div class="meta" style="margin:2px 0 6px">${summary}</div>${sortBar}<div class="cmp-grid">${cols}</div>`
+    grid = `${summary ? `<div class="meta" style="margin:2px 0 6px">${summary}</div>` : ""}${sortBar}<div class="cmp-grid">${cols}</div>`
       + (compareState.raceError ? `<div class="meta" style="color:var(--bad)">${esc(compareState.raceError)}</div>` : "");
   }
 
@@ -238,7 +237,7 @@ VIEWS.compare = function(d){
       oninput="compareState.message=this.value">${esc(compareState.message)}</textarea>
     <div class="cmp-picks">${chips}</div>
     <div style="margin-top:10px">
-      <button class="save" onclick="runCompare()" ${(!n||compareState.running)?"disabled":""}>
+      <button class="save cmp-race" onclick="runCompare()" ${(!n||compareState.running)?"disabled":""}>
         ${compareState.running?"Racing…":`Race ${n} model${n===1?"":"s"}`}</button>
     </div>
   </div>${grid}${compareHistoryHtml()}`;
