@@ -58,7 +58,7 @@ def test_reply_is_truncated(tmp_path, monkeypatch):
     assert len(ch.load_runs(tmp_path)[0]["results"][0]["reply"]) == 10
 
 
-def test_aggregate_averages_over_successful_runs_only(tmp_path):
+def test_aggregate_totals_over_successful_runs_only(tmp_path):
     runs = [
         {"message": "q1", "results": [_result("k:m", "m", 1000, 100, 100, 0.02),
                                       _result("g:n", "n", 2000, 200, 200, 0.04, error="boom")]},
@@ -67,7 +67,7 @@ def test_aggregate_averages_over_successful_runs_only(tmp_path):
     agg = {a["spec"]: a for a in ch.aggregate(runs)}
     m = agg["k:m"]
     assert m["runs"] == 2 and m["ok"] == 2
-    assert m["avg_latency_ms"] == 2000 and m["avg_tokens"] == 400 and m["avg_cost_usd"] == 0.04
+    assert m["total_latency_ms"] == 4000 and m["total_tokens"] == 800 and m["total_cost_usd"] == 0.08
     n = agg["g:n"]
-    assert n["runs"] == 1 and n["ok"] == 0          # errored run counted, not averaged
-    assert n["avg_cost_usd"] == 0.0
+    assert n["runs"] == 1 and n["ok"] == 0          # errored run counted, adds nothing to totals
+    assert n["total_cost_usd"] == 0.0

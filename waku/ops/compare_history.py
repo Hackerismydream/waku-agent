@@ -94,8 +94,9 @@ def load_runs(home: Path, limit: int | None = None) -> list[dict]:
 
 def aggregate(runs: list[dict]) -> list[dict]:
     """Per-model scoreboard across the given races: run count, successful count,
-    and averages of latency / tokens / cost over the SUCCESSFUL runs (errored
-    runs count against the total but don't skew the averages). Cheapest first."""
+    and CUMULATIVE totals of latency / tokens / cost over the successful runs
+    (errored runs count against `runs` but add nothing to the totals). Cheapest
+    total first; the frontend can re-sort by any column."""
     acc: dict[str, dict] = {}
     for run in runs:
         for r in run.get("results", []):
@@ -109,13 +110,9 @@ def aggregate(runs: list[dict]) -> list[dict]:
                 a["lat"] += r.get("latency_ms") or 0
                 a["tok"] += (r.get("tokens_in") or 0) + (r.get("tokens_out") or 0)
                 a["cost"] += r.get("cost_usd") or 0.0
-    out = []
-    for a in acc.values():
-        n = max(a["ok"], 1)   # avoid div-by-zero for all-errored models
-        out.append({"spec": a["spec"], "provider": a["provider"], "model": a["model"],
-                    "runs": a["runs"], "ok": a["ok"],
-                    "avg_latency_ms": round(a["lat"] / n),
-                    "avg_tokens": round(a["tok"] / n),
-                    "avg_cost_usd": round(a["cost"] / n, 4)})
-    out.sort(key=lambda x: x["avg_cost_usd"])
+    out = [{"spec": a["spec"], "provider": a["provider"], "model": a["model"],
+            "runs": a["runs"], "ok": a["ok"],
+            "total_latency_ms": a["lat"], "total_tokens": a["tok"],
+            "total_cost_usd": round(a["cost"], 4)} for a in acc.values()]
+    out.sort(key=lambda x: x["total_cost_usd"])
     return out

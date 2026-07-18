@@ -35,6 +35,13 @@ async function loadCompareHistory(){
   editing = false;   // ensure the scoreboard redraw isn't skipped by the edit-guard
   render();
 }
+// Sort the scoreboard by a column: same column flips asc<->desc, a new column
+// starts ascending (lowest/best first for time/tokens/cost).
+function setBoardSort(key){
+  const b = compareState.boardSort || {key: "total_cost_usd", dir: "asc"};
+  compareState.boardSort = (b.key === key) ? {key, dir: b.dir === "asc" ? "desc" : "asc"} : {key, dir: "asc"};
+  editing = false; render();
+}
 async function clearCompareHistory(){
   if (!confirm("Clear the compare scoreboard and race history? (Only the arena's own log — your real data is untouched.)")) return;
   const r = await postJSON("/api/compare/clear", {});
@@ -251,17 +258,23 @@ function compareHistoryHtml(){
   const agg = compareState.aggregate || [];
   const hist = compareState.history || [];
   if (!agg.length && !hist.length) return "";
+  // Cumulative totals across all races. Click a column header to sort by it —
+  // ascending first, click again to flip (arrow shows the active column + dir).
+  const bs = compareState.boardSort || (compareState.boardSort = {key: "total_cost_usd", dir: "asc"});
+  const arrow = k => bs.key === k ? (bs.dir === "asc" ? " ▲" : " ▼") : "";
+  const th = (k, label) => `<th class="cmp-th ${bs.key===k?"on":""}" onclick="setBoardSort('${k}')">${label}${arrow(k)}</th>`;
+  const rows = [...agg].sort((x, y) => ((x[bs.key] ?? 0) - (y[bs.key] ?? 0)) * (bs.dir === "asc" ? 1 : -1));
   const scoreboard = agg.length ? `
     <h2 style="margin-top:22px;display:flex;align-items:center;gap:10px">Scoreboard
-      <span class="meta" style="font-weight:400">— averaged across ${hist.length} race${hist.length===1?"":"s"}</span>
+      <span class="meta" style="font-weight:400">— totals across ${hist.length} race${hist.length===1?"":"s"}</span>
       <a class="reveal" style="margin-left:auto;font-size:12px" onclick="clearCompareHistory()">clear</a></h2>
     <div class="card" style="padding:4px 8px"><table>
-      <tr><th>model</th><th>races</th><th>ok</th><th>avg time</th><th>avg tokens</th><th>avg cost</th></tr>
-      ${agg.map(a=>`<tr>
+      <tr><th>model</th>${th("runs","races")}<th>ok</th>${th("total_latency_ms","total time")}${th("total_tokens","total tokens")}${th("total_cost_usd","total cost")}</tr>
+      ${rows.map(a=>`<tr>
         <td><span class="mm-prov">${esc(a.provider)}</span> <code>${esc(a.model)}</code></td>
         <td class="meta">${a.runs}</td><td class="meta">${a.ok}/${a.runs}</td>
-        <td class="meta">${secs(a.avg_latency_ms)}</td><td class="meta">${a.avg_tokens}</td>
-        <td class="meta" style="color:var(--good)">${money(a.avg_cost_usd)}</td></tr>`).join("")}
+        <td class="meta">${secs(a.total_latency_ms)}</td><td class="meta">${a.total_tokens}</td>
+        <td class="meta" style="color:var(--good)">${money(a.total_cost_usd)}</td></tr>`).join("")}
     </table></div>` : "";
   const recent = hist.length ? `
     <h2 style="margin-top:18px">Recent races <span class="meta" style="font-weight:400">— click to reopen</span></h2>
