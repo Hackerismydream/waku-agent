@@ -128,7 +128,17 @@ VIEWS.compare = function(d){
          Cheapest: <b>${money(Math.min(...done.map(r=>r.cost_usd||0)))}</b>
          · ${done.length}/${order.length} done`
       : `Racing ${order.length} models in isolated sandboxes — watch each column think and act live.`;
-    const cols = order.map(s => {
+    // Rank the fastest finished model to the front, then still-running, then
+    // errors — so as the race resolves, the winner rises to the top-left.
+    const rank = s => {
+      const r = results[s];
+      if (!r) return [2, 0];                       // not started
+      if (r.error) return [3, 0];                  // failed -> end
+      if (r.streaming) return [1, 0];              // running -> middle
+      return [0, r.latency_ms || 0];               // done -> front, fastest first
+    };
+    const shown = [...order].sort((a, b) => { const ra = rank(a), rb = rank(b); return ra[0] - rb[0] || ra[1] - rb[1]; });
+    const cols = shown.map(s => {
       const r = results[s];
       if (r) return compareCol(r);
       return `<div class="cmp-col"><div class="cmp-h"><span class="mm-prov">${esc(s.split(":")[0])}</span> <code>${esc(s.split(":").slice(1).join(":"))}</code></div>

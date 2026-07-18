@@ -317,8 +317,10 @@
        border:1px solid var(--line2);border-radius:99px;padding:4px 10px;cursor:pointer}
   .cmp-pick.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
   .cmp-pick input{margin:0}
-  .cmp-grid{display:flex;gap:12px;margin-top:12px;overflow-x:auto;padding-bottom:6px;align-items:stretch}
-  .cmp-col{flex:0 0 300px;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  /* Responsive: as many ~300px columns as fit, then wrap to the next row. */
+  .cmp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
+       gap:12px;margin-top:12px;align-items:start}
+  .cmp-col{background:var(--panel);border:1px solid var(--line);border-radius:12px;
        padding:12px 14px;display:flex;flex-direction:column;gap:8px}
   .cmp-col.err{border-color:var(--bad)}
   .cmp-h{display:flex;align-items:center;gap:6px;font-size:13px}
