@@ -33,6 +33,31 @@ def test_openai_default_is_tool_capable(tmp_path):
     assert PROVIDERS["openai"].default_pair() == ["gpt-5-chat-latest", "gpt-4.1-mini"]
 
 
+def test_gemini_thought_signature_round_trips():
+    """Gemini thinking models attach a thought_signature to each tool call and
+    REQUIRE it echoed back next turn, or the follow-up 400s. The OpenAI-compat
+    adapter must capture it on parse (_create) and put it back on serialize
+    (_to_openai). Verified end-to-end without a network call."""
+    from waku.loop.models import OpenAICompatClient
+
+    client = OpenAICompatClient.__new__(OpenAICompatClient)   # skip __init__ (no network)
+    sig = {"google": {"thought_signature": "ABC123"}}
+    toolcall = SimpleNamespace(id="t1", extra_content=sig,
+                               function=SimpleNamespace(name="create_event", arguments='{"title":"x"}'))
+    resp = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[toolcall]))],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1))
+    client._call = lambda kwargs, **extra: resp
+
+    parsed = client._create(model="gemini-3.5-flash", messages=[{"role": "user", "content": "hi"}], max_tokens=10)
+    block = next(b for b in parsed.content if b.type == "tool_use")
+    assert block.extra == sig                                  # captured on parse
+
+    kwargs = client._to_openai(model="gemini-3.5-flash", max_tokens=10,
+                               messages=[{"role": "assistant", "content": parsed.content}])
+    assert kwargs["messages"][0]["tool_calls"][0]["extra_content"] == sig   # echoed back
+
+
 def test_deepseek_provider_uses_expected_key_endpoint_and_models(monkeypatch, tmp_path):
     captured = {}
 

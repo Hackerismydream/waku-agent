@@ -152,11 +152,16 @@ class OpenAICompatClient:
             elif message["role"] == "assistant":
                 # anthropic content blocks → assistant text + tool_calls
                 text = "".join(b.text for b in content if getattr(b, "type", "") == "text")
-                calls = [
-                    {"id": b.id, "type": "function",
-                     "function": {"name": b.name, "arguments": json.dumps(b.input)}}
-                    for b in content if getattr(b, "type", "") == "tool_use"
-                ]
+                calls = []
+                for b in content:
+                    if getattr(b, "type", "") != "tool_use":
+                        continue
+                    call = {"id": b.id, "type": "function",
+                            "function": {"name": b.name, "arguments": json.dumps(b.input)}}
+                    extra = getattr(b, "extra", None)   # Gemini thought_signature
+                    if extra:
+                        call["extra_content"] = extra
+                    calls.append(call)
                 entry: dict = {"role": "assistant", "content": text or None}
                 if calls:
                     entry["tool_calls"] = calls
@@ -216,6 +221,11 @@ class OpenAICompatClient:
             blocks.append(SimpleNamespace(
                 type="tool_use", id=call.id, name=call.function.name,
                 input=json.loads(call.function.arguments or "{}"),
+                # Gemini's thinking models attach a thought_signature here and
+                # REQUIRE it echoed back with the tool call next turn, else the
+                # follow-up 400s ("missing a thought_signature"). Carry it so
+                # _to_openai can put it back. None for every other provider.
+                extra=getattr(call, "extra_content", None),
             ))
         usage = getattr(response, "usage", None)
         return SimpleNamespace(
