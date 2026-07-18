@@ -23,6 +23,34 @@ function saveCompare(){
     message: compareState.message, order: compareState.order, results: compareState.results})); } catch(e){}
 }
 
+// --- Compare history: past races + a cumulative per-model scoreboard, from the
+// server's own compare/history.jsonl (never the agent's real state). Loaded once
+// when the tab opens and refreshed after each race.
+async function loadCompareHistory(){
+  try {
+    const h = await (await fetch("/api/compare/history")).json();
+    compareState.history = h.runs || [];
+    compareState.aggregate = h.aggregate || [];
+  } catch(e){ compareState.history = []; compareState.aggregate = []; }
+  editing = false;   // ensure the scoreboard redraw isn't skipped by the edit-guard
+  render();
+}
+// A stored (slimmed) result -> the shape compareCol expects (gate object, tool
+// objects), so a past race renders identically to a live one.
+function adaptHistResult(r){
+  return {...r, gate: r.gate ? {decision: r.gate} : null,
+          tools: (r.tools || []).map(t => ({tool: t}))};
+}
+// Reopen a past race into the columns (read-only view of that run).
+function openCompareRun(idx){
+  const run = (compareState.history || [])[idx];
+  if (!run) return;
+  compareState.order = run.results.map(r => r.spec);
+  compareState.results = {}; run.results.forEach(r => { compareState.results[r.spec] = adaptHistResult(r); });
+  compareState.message = run.message;
+  render();
+}
+
 // Which models are offered: your pinned shortlist (models.json). Default-pick
 // the first (flagship) of each provider so the race is one brain per lab.
 function compareModels(d){
@@ -89,6 +117,7 @@ async function runCompare(){
     }
   } catch(e){ compareState.raceError = String(e); }
   compareState.running = false; saveCompare(); render();
+  loadCompareHistory();   // the server just logged this race — refresh the scoreboard
 }
 
 // One contestant's column. While the model runs (res.streaming) it plays out
@@ -193,6 +222,10 @@ VIEWS.compare = function(d){
       + (compareState.raceError ? `<div class="meta" style="color:var(--bad)">${esc(compareState.raceError)}</div>` : "");
   }
 
+  // Load the history once when the tab first opens (setting [] first stops the
+  // 5s refresh from re-triggering); loadCompareHistory re-renders when it lands.
+  if (compareState.history === undefined){ compareState.history = []; setTimeout(loadCompareHistory, 0); }
+
   return `<div class="card">
     <div class="meta" style="margin-bottom:6px">One message, every brain at once — same harness, isolated homes, real receipts (gate · latency · cost · tools). Compare, don't guess.</div>
     <textarea id="cmp-msg" class="cmp-input" rows="2" onfocus="markEditing()"
@@ -202,5 +235,33 @@ VIEWS.compare = function(d){
       <button class="save" onclick="runCompare()" ${(!n||compareState.running)?"disabled":""}>
         ${compareState.running?"Racing…":`Race ${n} model${n===1?"":"s"}`}</button>
     </div>
-  </div>${grid}`;
+  </div>${grid}${compareHistoryHtml()}`;
 };
+
+// The cumulative view under the current race: a per-model scoreboard averaged
+// across every logged race, then the list of recent races (click to reopen).
+// Data comes from GET /api/compare/history (the arena's own JSONL, never the
+// agent's real state).
+function compareHistoryHtml(){
+  const agg = compareState.aggregate || [];
+  const hist = compareState.history || [];
+  if (!agg.length && !hist.length) return "";
+  const scoreboard = agg.length ? `
+    <h2 style="margin-top:22px">Scoreboard <span class="meta" style="font-weight:400">— averaged across ${hist.length} race${hist.length===1?"":"s"}</span></h2>
+    <div class="card" style="padding:4px 8px"><table>
+      <tr><th>model</th><th>races</th><th>ok</th><th>avg time</th><th>avg tokens</th><th>avg cost</th></tr>
+      ${agg.map(a=>`<tr>
+        <td><span class="mm-prov">${esc(a.provider)}</span> <code>${esc(a.model)}</code></td>
+        <td class="meta">${a.runs}</td><td class="meta">${a.ok}/${a.runs}</td>
+        <td class="meta">${secs(a.avg_latency_ms)}</td><td class="meta">${a.avg_tokens}</td>
+        <td class="meta" style="color:var(--good)">${money(a.avg_cost_usd)}</td></tr>`).join("")}
+    </table></div>` : "";
+  const recent = hist.length ? `
+    <h2 style="margin-top:18px">Recent races <span class="meta" style="font-weight:400">— click to reopen</span></h2>
+    <div class="card">${hist.map((run,i)=>`
+      <div class="pinrow" style="cursor:pointer" onclick="openCompareRun(${i})">
+        <code style="flex:1;word-break:break-all">${esc((run.message||"").slice(0,90))}</code>
+        <span class="meta" style="white-space:nowrap">${(run.results||[]).length} models · ${esc((run.ts||"").slice(0,16).replace("T"," "))}</span>
+      </div>`).join("")}</div>` : "";
+  return scoreboard + recent;
+}

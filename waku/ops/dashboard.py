@@ -29,6 +29,7 @@ from pathlib import Path
 
 from waku.config import load_settings
 from waku.db import connect
+from waku.ops import compare_history
 
 PORT = 7777
 # The frontend lives in its own files (static/index.html + style.css + app.js),
@@ -264,10 +265,13 @@ def compare_stream(message: str, specs: list, emit) -> None:
         return
 
     lock = threading.Lock()
+    collected: list = []   # per-model results, saved to the compare history at the end
 
     def send(kind, ev):
         with lock:
             emit(kind, ev)
+            if kind == "result":
+                collected.append(ev)
 
     def run(spec):
         provider, _, model = spec.partition(":")
@@ -315,6 +319,11 @@ def compare_stream(message: str, specs: list, emit) -> None:
 
     with ThreadPoolExecutor(max_workers=min(len(specs), 6)) as ex:
         list(ex.map(run, specs))
+    # Persist the race to the arena's own history (never the agent's real state).
+    try:
+        compare_history.append_run(load_settings().home, message, collected)
+    except Exception:
+        pass   # a history-write hiccup must never fail the race
     emit("done", {})
 
 
@@ -1224,6 +1233,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 — http.server API
         if self.path == "/api/data":
             self._send(json.dumps(collect(), default=str).encode(), "application/json")
+        elif self.path == "/api/compare/history":
+            home = load_settings().home
+            runs = compare_history.load_runs(home)
+            self._send(json.dumps({"runs": runs[-20:][::-1],   # newest first for display
+                                   "aggregate": compare_history.aggregate(runs)}).encode(),
+                       "application/json")
         elif self.path.startswith("/api/models"):
             from urllib.parse import parse_qs, urlparse
 
