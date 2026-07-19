@@ -65,15 +65,15 @@ function toggleSessMenu(ev){
   // "All messages" shows the full cross-thread timeline (like the Loop tab, but
   // as chat) — so your whole history is one scroll, not split across threads.
   const allItem = `<div class="sessitem allitem ${liveView==='__all__'?'on':''}" onclick="viewAllHistory()">
-      <div><b>All messages</b> — full timeline</div>
-      <div class="sm">every thread together, newest last</div></div>`;
+      <div><b>全部消息</b>，完整时间线</div>
+      <div class="sm">汇总所有对话，最新消息在底部</div></div>`;
   menu.innerHTML = allItem + (sessions.length ? sessions.map(s => {
-    const tags = (s.sources||[]).map(src => `<span class="gwtag ${esc(src)}">${esc(src)}</span>`).join("");
+    const tags = (s.sources||[]).map(src => `<span class="gwtag ${esc(src)}">${esc(sourceLabel(src))}</span>`).join("");
     return `<div class="sessitem ${s.id===SESSION?"on":""}" onclick="openConversation('${esc(s.id)}')">
       <div>${esc(s.title||s.id)} ${tags}</div>
-      <div class="sm">${s.messages} msg · ${esc((s.last_at||"").slice(0,16).replace("T"," "))}</div>
+      <div class="sm">${s.messages} 条消息 · ${esc((s.last_at||"").slice(0,16).replace("T"," "))}</div>
     </div>`;
-  }).join("") : `<div class="sessitem">no past conversations yet</div>`);
+  }).join("") : `<div class="sessitem">还没有历史对话</div>`);
   const r = ev.currentTarget.getBoundingClientRect();
   menu.style.top = (r.bottom+6)+"px";
   menu.style.left = Math.max(8, r.right-300)+"px";
@@ -94,7 +94,7 @@ function syncModelChip(){
   const el = document.getElementById("modelchip");
   if (!el || !D || !D.settings) return;
   const st = D.settings;
-  el.innerHTML = `<span class="mc-dot"></span><span class="mc-name">${esc(st.model || st.provider || "model")}</span><span class="mc-caret">&#9662;</span>`;
+  el.innerHTML = `<span class="mc-dot"></span><span class="mc-name">${esc(st.model || st.provider || "模型")}</span><span class="mc-caret">&#9662;</span>`;
 }
 function closeModelMenu(){ const m = document.getElementById("modelmenu"); if (m) m.remove(); }
 
@@ -121,12 +121,12 @@ function toggleModelMenu(ev){
     `<div class="sessitem ${(p.provider===st.provider && p.model===st.model)?"on":""}"
           onclick="switchTo('${esc(p.provider)}','${esc(p.model)}')">
        <span class="mm-prov">${esc(p.provider)}</span> <span class="mm-id">${esc(p.model)}</span>${
-       p.default?'<span class="mm-def">default</span>':""}</div>`
-  ).join("") : `<div class="sessitem">No models pinned yet.</div>`;
+       p.default?'<span class="mm-def">默认</span>':""}</div>`
+  ).join("") : `<div class="sessitem">还没有收藏模型。</div>`;
   const menu = document.createElement("div");
   menu.className = "sessmenu modelmenu"; menu.id = "modelmenu";
-  menu.innerHTML = `<div class="mm-h">Your models</div>${items}`
-    + `<div class="mm-f"><a href="#settings" onclick="closeModelMenu()">+ add models in Settings &rsaquo;</a></div>`;
+  menu.innerHTML = `<div class="mm-h">我的模型</div>${items}`
+    + `<div class="mm-f"><a href="#settings" onclick="closeModelMenu()">+ 前往设置添加模型 &rsaquo;</a></div>`;
   const r = ev.currentTarget.getBoundingClientRect();
   menu.style.top = (r.bottom + 6) + "px";
   menu.style.left = Math.max(8, r.right - 250) + "px";
@@ -140,7 +140,7 @@ async function switchTo(provider, model){
   const chip = document.getElementById("modelchip");
   const name = chip && chip.querySelector(".mc-name");
   closeModelMenu();
-  if (name) name.textContent = "switching…";
+  if (name) name.textContent = "切换中…";
   await applyModel({provider, model,
     small_model: provider === st.provider ? st.small_model : ""});
 }

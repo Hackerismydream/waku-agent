@@ -3,17 +3,20 @@
 // step, no modules). Load order + rules: static/README.md.
 
 const money = n => "$" + (n < 0.01 ? n.toFixed(4) : n.toFixed(2));
-const secs = ms => ms==null ? "—" : (ms/1000).toFixed(1)+"s";
+const secs = ms => ms==null ? "无" : (ms/1000).toFixed(1)+" 秒";
+const gateDecision = v => ({skip:"跳过记忆", retrieve:"检索记忆"}[v] || v || "");
+const evalStatus = v => ({pass:"通过", fail:"失败", skip:"跳过"}[v] || v || "");
+const sourceLabel = v => ({dashboard:"网页", telegram:"Telegram", voice:"语音", cli:"终端", brief:"晨间简报"}[v] || v || "");
 
 const gateBadge = g => !g ? "" :
-  `<span class="badge ${g.decision==="retrieve"?"retrieve":""}">gate · ${esc(g.decision)}</span><span class="meta" style="margin:0">${esc(g.reason||"")}</span>`;
+  `<span class="badge ${g.decision==="retrieve"?"retrieve":""}">检索门 · ${esc(gateDecision(g.decision))}</span><span class="meta" style="margin:0">${esc(g.reason||"")}</span>`;
 
 // A tool call renders as a status row (dot + one-line summary); the raw output
 // hides behind a disclosure so an ugly osascript error never floods the page.
 const toolRow = x => `<div class="tool ${x.status||"ok"}">
   <div class="tool-head"><span class="dot ${x.status||"ok"}"></span><code>${esc(x.tool)}</code>
     ${x.summary?`<span style="color:var(--ink2)">${esc(x.summary)}</span>`:""}</div>
-  ${x.output!==undefined?`<details><summary>args &amp; raw output</summary>
+  ${x.output!==undefined?`<details><summary>参数与原始输出</summary>
     <pre>${esc(x.tool)}(${esc(JSON.stringify(x.args,null,1))})\n\n${esc(x.output)}</pre>
   </details>`:""}
 </div>`;
@@ -35,17 +38,17 @@ const turnCard = t => `<div class="card">
   <div class="meta" style="margin-top:4px">${gateBadge(t.gate)}</div>
   ${(t.tools||[]).map(toolRow).join("")}
   <div class="r">${renderMarkdown(t.reply)}</div>
-  <div class="meta">${esc((t.ts||"").replace("T"," ").slice(0,19))} · ${secs(t.latency_ms)} · ${t.iterations??"?"} iter · ${money(t.cost||0)}${t.consolidation?` · consolidated ${t.consolidation.new_facts} fact(s)`:""}</div>
+  <div class="meta">${esc((t.ts||"").replace("T"," ").slice(0,19))} · ${secs(t.latency_ms)} · ${t.iterations??"?"} 轮 · ${money(t.cost||0)}${t.consolidation?` · 归纳 ${t.consolidation.new_facts} 条事实`:""}</div>
 </div>`;
 
 const table = (heads, rows) => rows.length
   ? `<div class="card" style="padding:4px 8px"><table><tr>${heads.map(h=>`<th>${h}</th>`).join("")}</tr>${rows.join("")}</table></div>`
-  : `<div class="card empty">nothing here yet</div>`;
+  : `<div class="card empty">这里还没有内容</div>`;
 
 const gateSplit = s => {
   if (!(s.gate_skips + s.gate_retrieves))
     return `<div class="splitbar"><div class="seg-skip" style="width:100%;opacity:.35"></div></div>
-      <div class="meta" style="margin-top:6px">no turns yet — send a message and the gate starts deciding</div>`;
+      <div class="meta" style="margin-top:6px">还没有对话。发送消息后，检索门会开始判断是否需要读取记忆。</div>`;
   const tot = s.gate_skips + s.gate_retrieves;
   const skipPct = Math.round(s.gate_skips/tot*100), retPct = 100-skipPct;
   // only label a segment when it's wide enough to fit the text — otherwise a
@@ -53,9 +56,9 @@ const gateSplit = s => {
   const seg = (cls, n, label, pct) =>
     `<div class="${cls}" style="width:${pct}%">${pct>=14?`${n} ${label}`:""}</div>`;
   return `<div class="splitbar">
-    ${seg("seg-skip", s.gate_skips, "skipped", skipPct)}
-    ${seg("seg-ret", s.gate_retrieves, "retrieved", retPct)}
-  </div><div class="meta" style="margin-top:6px">the retrieval gate skipped memory on ${skipPct}% of turns — that's latency and bias saved</div>`;
+    ${seg("seg-skip", s.gate_skips, "次跳过", skipPct)}
+    ${seg("seg-ret", s.gate_retrieves, "次检索", retPct)}
+  </div><div class="meta" style="margin-top:6px">${skipPct}% 的对话无需读取记忆，减少了延迟和无关记忆的干扰。</div>`;
 };
 
 // --- Chat gateway: type here, watch the harness run (turns kept in memory)
@@ -68,14 +71,14 @@ const CHAT = [];
 function stagesRow(t, live){
   const gateCls = live ? (t.gate ? "done" : "on") : "done";
   const replyCls = live ? (t.stream ? "on" : "") : "done";
-  const tools = (t.tools||[]).map(x => `<span class="stage done">tool · ${esc(x.tool)}</span>`).join("");
+  const tools = (t.tools||[]).map(x => `<span class="stage done">工具 · ${esc(x.tool)}</span>`).join("");
   return `<div class="stages${live?"":" tele"}">`
-    + `<span class="stage ${gateCls}">gate${t.gate?` · ${esc(t.gate.decision)}`:""}</span>`
-    + tools + `<span class="stage ${replyCls}">reply</span></div>`;
+    + `<span class="stage ${gateCls}">检索门${t.gate?` · ${esc(gateDecision(t.gate.decision))}`:""}</span>`
+    + tools + `<span class="stage ${replyCls}">回复</span></div>`;
 }
 // The per-turn telemetry footer: seconds · iterations · model · consolidation.
-const teleFooter = t => `<div class="meta tele">${secs(t.latency_ms)} · ${t.iterations??"?"} iter${
-  t.model?` · ${esc(t.model)}`:""}${t.consolidation?` · consolidated ${t.consolidation.new_facts} fact(s)`:""}</div>`;
+const teleFooter = t => `<div class="meta tele">${secs(t.latency_ms)} · ${t.iterations??"?"} 轮${
+  t.model?` · ${esc(t.model)}`:""}${t.consolidation?` · 归纳 ${t.consolidation.new_facts} 条事实`:""}</div>`;
 
 const chatTurnCard = t => `<div class="card">
   ${t.gate?`${stagesRow(t, false)}
@@ -93,9 +96,9 @@ const streamingCard = m => `<div class="card">
   ${(m.tools||[]).map(toolRow).join("")}
   ${m.stream
      ? `<div class="r" style="margin-top:8px">${renderMarkdown(m.stream)}<span class="caret"></span></div>`
-     : `<div class="meta" style="margin:0">thinking&hellip;${m.started?` ${Math.round((Date.now()-m.started)/1000)}s`:""}${
+     : `<div class="meta" style="margin:0">思考中&hellip;${m.started?` ${Math.round((Date.now()-m.started)/1000)} 秒`:""}${
          m.started && Date.now()-m.started > 20000
-         ? `<br>still waiting: slow models (free tiers especially) can queue for a while; this errors out at the WAKU_LLM_TIMEOUT limit instead of hanging forever`
+         ? `<br>仍在等待：较慢的模型，尤其是免费额度，可能需要排队。达到 WAKU_LLM_TIMEOUT 后会报错，不会无限等待。`
          : ""}</div>`}
 </div>`;
 
@@ -107,7 +110,7 @@ const historicalCard = m => `<div class="card"><div class="r">${renderMarkdown(s
 
 function renderChatLog(){
   if (!CHAT.length)
-    return `<div class="empty" style="padding:6px 2px">Message Waku here from any tab. Open Overview to watch it flow through the harness, or the Gateway tab to see every channel's messages together.</div>`;
+    return `<div class="empty" style="padding:6px 2px">可以在任何页面给 Waku 发消息。打开“总览”查看消息如何流经系统，或在“会话入口”查看所有渠道的对话。</div>`;
   return CHAT.map(m => m.role==="user"
       ? `<div class="bubble">${esc(m.text)}</div>`
       : m.pending ? streamingCard(m)
@@ -135,7 +138,7 @@ function applyStreamEvent(pending, ev){
     pending.stream = "";   // a new assistant turn begins after the tool result
   } else if (ev.kind === "done"){
     pending.pending = false; pending.stream = "";
-    if (ev.error) pending.reply = "Error: " + ev.error;
+    if (ev.error) pending.reply = "错误：" + ev.error;
     else Object.assign(pending, ev);   // reply, tools, gate, iterations, latency_ms, consolidation
   }
 }
@@ -168,7 +171,7 @@ async function sendChat(fromInput){
         syncChatLogs();
       }
     }
-  } catch(e){ Object.assign(pending, {pending:false, reply:"Error: "+e}); }
+  } catch(e){ Object.assign(pending, {pending:false, reply:"错误："+e}); }
   clearInterval(ticker);
   if (pending.pending) pending.pending = false;   // stream ended without a 'done'
   syncChatLogs();
@@ -186,4 +189,3 @@ function wireDock(){
   setClosed(saved === null ? window.innerWidth < 1180 : saved === "1");
   syncChatLogs();
 }
-

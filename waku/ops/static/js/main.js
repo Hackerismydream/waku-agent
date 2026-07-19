@@ -3,8 +3,11 @@
 // step, no modules). Load order + rules: static/README.md.
 
 let activeView = null, activeSub = null;
-const TITLES = {chat:"Chat & watch", ops:"LLM Ops",
-                database:"Database — everything Waku stores (state.db)"};
+const TITLES = {
+  overview:"总览", gateway:"会话入口", loop:"智能循环", memory:"记忆",
+  tools:"工具", database:"数据库：Waku 保存的全部数据（state.db）",
+  ops:"运行与评测", compare:"模型对比", settings:"设置",
+};
 function render(){
   if (!D) return;
   const [v, subRaw] = (location.hash||"#overview").slice(1).split("/");
@@ -12,7 +15,7 @@ function render(){
   const view = VIEWS[v] ? v : "overview";
   const subChanged = sub !== activeSub || view !== activeView;
   document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("on", a.dataset.v===view));
-  document.getElementById("title").textContent = TITLES[view] || view[0].toUpperCase()+view.slice(1);
+  document.getElementById("title").textContent = TITLES[view] || view;
   if (view === "overview"){
     // don't rebuild mid-animation or the glowing SVG gets wiped
     if (activeView !== "overview" || !animating){ document.getElementById("view").innerHTML = VIEWS.overview(D); }
@@ -36,7 +39,7 @@ function tickLive(){
   if (!D) return;
   const ago = Math.round((Date.now()-lastFetch)/1000);
   document.getElementById("sub").innerHTML =
-    `<span class="live"><span class="dot"></span>live</span> · updated ${ago}s ago · ${esc(D.home)}`;
+    `<span class="live"><span class="dot"></span>实时</span> · ${ago} 秒前更新 · ${esc(D.home)}`;
 }
 let dockRestored = false;
 async function restoreDock(){
@@ -88,7 +91,8 @@ function wireChrome(){
   const nt = document.getElementById("nav-toggle"), nr = document.getElementById("nav-reopen");
   if (nt) nt.onclick = () => setNav(true);
   if (nr) nr.onclick = () => setNav(false);
-  setNav(localStorage.getItem("navHidden") === "1");
+  const savedNav = localStorage.getItem("navHidden");
+  setNav(savedNav === "1" || (savedNav === null && window.innerWidth < 720));
 }
 
 // --- voice on the dashboard: record in the browser, transcribe on the server
@@ -99,13 +103,13 @@ function wireChrome(){
 // ("transcription failed [Errno …]"). WAV is trivially decodable server-side.
 let micCtx = null, micStream = null, micNode = null, micBuf = [], micOn = false;
 const micHint = (msg) => { const i = document.getElementById("dmsg");
-  if (i){ i.placeholder = msg; setTimeout(()=>{ i.placeholder = "Message Waku…"; }, 8000); } };
+  if (i){ i.placeholder = msg; setTimeout(()=>{ i.placeholder = "给 Waku 发消息…"; }, 8000); } };
 
 async function toggleMic(){
   const btn = document.getElementById("mic");
   if (micOn){ await stopMic(); return; }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    micHint("voice needs a normal browser tab at localhost:7777 — not the IDE preview pane");
+    micHint("语音输入需要在浏览器中打开 localhost:7777，IDE 预览窗口无法使用");
     return;
   }
   try {
@@ -120,8 +124,8 @@ async function toggleMic(){
   } catch(e){
     console.warn("mic error:", e);
     micHint(e && e.name === "NotAllowedError"
-      ? "mic blocked — click the lock icon in the address bar → allow Microphone → reload (macOS: also System Settings ▸ Privacy ▸ Microphone ▸ your browser)"
-      : "mic unavailable: " + (e && e.message || e));
+      ? "麦克风被禁用：点击地址栏锁形图标，允许使用麦克风后刷新。macOS 还需在系统设置 > 隐私与安全性 > 麦克风中允许当前浏览器"
+      : "麦克风不可用：" + (e && e.message || e));
   }
 }
 
@@ -133,11 +137,11 @@ async function stopMic(){
   const rate = micCtx.sampleRate;
   micCtx.close();
   const wav = encodeWAV(micBuf, rate);
-  const hold = input.placeholder; input.placeholder = "transcribing…";
+  const hold = input.placeholder; input.placeholder = "正在转写…";
   let r; try { r = await (await fetch("/api/voice", {method:"POST", body:wav})).json(); }
   catch(e){ r = {error:String(e)}; }
   input.placeholder = hold;
-  if (r.error){ input.value = ""; micHint("voice: " + r.error); return; }
+  if (r.error){ input.value = ""; micHint("语音转写失败：" + r.error); return; }
   if (r.text){ input.value = r.text; input.focus(); }
 }
 

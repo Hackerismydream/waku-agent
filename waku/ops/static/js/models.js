@@ -18,9 +18,9 @@ async function saveSettings(){
   const small_model = (document.getElementById("set-small-model")?.value || "").trim();
   const keys = {};
   document.querySelectorAll("[data-key]").forEach(i => { if(i.value.trim()) keys[i.dataset.key] = i.value.trim(); });
-  document.getElementById("set-msg").textContent = "switching…";
+  document.getElementById("set-msg").textContent = "切换中…";
   const r = await applyModel({provider, model, small_model, keys});
-  document.getElementById("set-msg").textContent = r.error ? ("Error: "+r.error) : "Switched to "+r.provider+" — live now.";
+  document.getElementById("set-msg").textContent = r.error ? ("错误："+r.error) : "已切换到 "+r.provider+"，立即生效。";
 }
 function markEditing(){ editing = true; }
 
@@ -37,20 +37,20 @@ async function loadModelList(){
   }
   const ms = modelCatalog.models || [];
   dl.innerHTML = ms.map(m => {
-    const price = m.free ? "free" : (m.price_out != null ? `$${m.price_in}/$${m.price_out} per M` : "");
-    const tags = [price, m.tools === false ? "chat-only" : "", m.reasoning ? "reasoning" : "",
-                  m.context ? Math.round(m.context/1000) + "k ctx" : ""].filter(Boolean).join(" · ");
+    const price = m.free ? "免费" : (m.price_out != null ? `$${m.price_in}/$${m.price_out} 每百万 token` : "");
+    const tags = [price, m.tools === false ? "仅聊天" : "", m.reasoning ? "推理模型" : "",
+                  m.context ? Math.round(m.context/1000) + "k 上下文" : ""].filter(Boolean).join(" · ");
     return `<option value="${esc(m.id)}">${esc(tags)}</option>`;
   }).join("");
   const msg = document.getElementById("model-list-msg");
   if (!msg) return;
   if (modelCatalog.listed){
     const free = ms.filter(m=>m.free), freeTools = free.filter(m=>m.tools);
-    msg.textContent = `${ms.length} models on ${modelCatalog.endpoint}` +
-      (free.length ? ` · ${free.length} free, ${freeTools.length} of those tool-capable (Waku needs tool calling)` : "") +
-      ` · type in the field above to search`;
+    msg.textContent = `${modelCatalog.endpoint} 提供 ${ms.length} 个模型` +
+      (free.length ? ` · ${free.length} 个免费，其中 ${freeTools.length} 个支持工具调用（Waku 需要工具调用）` : "") +
+      ` · 在上方输入框中搜索`;
   } else {
-    msg.textContent = modelCatalog.error ? `model list unavailable: ${modelCatalog.error}` : "";
+    msg.textContent = modelCatalog.error ? `无法获取模型列表：${modelCatalog.error}` : "";
   }
   renderCatalog();
 }
@@ -65,20 +65,20 @@ let catFilter = {q: "", free: false, tools: false};
 function modelRow(m, st){
   const cur = m.id === st.model, curGate = m.id === st.small_model;
   const isPinned = (st.pinned || []).some(p => p.provider === st.provider && p.model === m.id);
-  const price = m.free ? "free" : (m.price_out != null ? `$${m.price_in}/$${m.price_out} per M` : "");
-  const tags = [price, m.context ? Math.round(m.context/1000) + "k ctx" : ""]
+  const price = m.free ? "免费" : (m.price_out != null ? `$${m.price_in}/$${m.price_out} 每百万 token` : "");
+  const tags = [price, m.context ? Math.round(m.context/1000) + "k 上下文" : ""]
                .filter(Boolean).join(" · ");
   return `<div class="tool" style="display:flex;align-items:center;gap:8px;padding:6px 8px">
-    <a class="pinstar ${isPinned?"on":""}" title="${isPinned?"pinned to Your models — click to remove":"pin to Your models (shows in chat switcher)"}"
+    <a class="pinstar ${isPinned?"on":""}" title="${isPinned?"已收藏到“我的模型”，点击移除":"收藏到“我的模型”，会显示在聊天模型切换器中"}"
        onclick="pinModel('${esc(st.provider)}','${esc(m.id)}','${isPinned?"unpin":"pin"}')">${isPinned?"★":"☆"}</a>
     <code style="flex:1;word-break:break-all">${esc(m.id)}</code>
     <span class="meta" style="margin:0;white-space:nowrap">${esc(tags)}</span>
-    ${m.reasoning ? `<span class="srcpill apple" title="thinks out loud before answering: fine for the loop, a poor fit for the gate's tiny token budget">reasoning</span>` : ""}
-    ${curGate ? `<span class="srcpill">GATE</span>`
-              : `<a class="reveal" data-id="${esc(m.id)}" onclick="switchModel(this.dataset.id,true)" title="use as the gate/summary model">gate</a>`}
-    ${cur ? `<span class="srcpill" style="background:var(--good-soft);color:var(--good)">CURRENT</span>`
-          : (m.tools === false ? `<span class="meta" style="margin:0" title="the loop needs tool calling">chat-only</span>`
-                               : `<button class="save" data-id="${esc(m.id)}" onclick="switchModel(this.dataset.id)">use</button>`)}
+    ${m.reasoning ? `<span class="srcpill apple" title="回答前会进行推理，适合主循环，但不适合 token 预算较小的检索门">推理模型</span>` : ""}
+    ${curGate ? `<span class="srcpill">检索门</span>`
+              : `<a class="reveal" data-id="${esc(m.id)}" onclick="switchModel(this.dataset.id,true)" title="设为检索门与归纳模型">设为检索门</a>`}
+    ${cur ? `<span class="srcpill" style="background:var(--good-soft);color:var(--good)">当前模型</span>`
+          : (m.tools === false ? `<span class="meta" style="margin:0" title="主循环需要工具调用能力">仅聊天</span>`
+                               : `<button class="save" data-id="${esc(m.id)}" onclick="switchModel(this.dataset.id)">使用</button>`)}
   </div>`;
 }
 
@@ -108,12 +108,12 @@ function renderCatalog(){
   box.style.display = ""; if (head) head.style.display = "";
   box.innerHTML = `
     <div class="cat-controls">
-      <input id="cat-q" type="text" placeholder="filter models…" value="${esc(catFilter.q)}"
+      <input id="cat-q" type="text" placeholder="筛选模型…" value="${esc(catFilter.q)}"
         onfocus="markEditing()" oninput="catFilter.q=this.value;renderCatalogList()">
       <label class="meta" style="margin:0"><input type="checkbox" id="cat-free" ${catFilter.free?"checked":""}
-        onchange="catFilter.free=this.checked;renderCatalogList()"> free only</label>
+        onchange="catFilter.free=this.checked;renderCatalogList()"> 仅看免费模型</label>
       <label class="meta" style="margin:0"><input type="checkbox" id="cat-tools" ${catFilter.tools?"checked":""}
-        onchange="catFilter.tools=this.checked;renderCatalogList()"> tool-capable only</label>
+        onchange="catFilter.tools=this.checked;renderCatalogList()"> 仅看支持工具的模型</label>
     </div>
     <div id="cat-list"></div>
     <div class="meta" id="free-switch-msg" style="margin-top:6px"></div>`;
@@ -131,21 +131,21 @@ function renderCatalogList(){
                              && (!catFilter.tools || m.tools));
   let h = "";
   if (!q && !catFilter.free && !catFilter.tools){
-    h += `<div class="meta" style="margin:4px 0">Suggested picks: transparent heuristics from catalog metadata (tools, price, context), not a quality leaderboard</div>`;
-    h += `<div class="meta" style="margin:6px 0 2px"><b>For the loop</b> (needs tool calling; free first, biggest context)</div>`;
+    h += `<div class="meta" style="margin:4px 0">推荐依据公开的目录元数据：工具能力、价格和上下文长度，不代表模型质量排名。</div>`;
+    h += `<div class="meta" style="margin:6px 0 2px"><b>主循环模型</b>（需要工具调用，免费优先，上下文更长优先）</div>`;
     h += loopPicks(all).map(m => modelRow(m, st)).join("");
-    h += `<div class="meta" style="margin:10px 0 2px"><b>For the gate</b> (cheap, terse, non-reasoning)</div>`;
+    h += `<div class="meta" style="margin:10px 0 2px"><b>检索门模型</b>（便宜、简洁、非推理模型）</div>`;
     h += gatePicks(all).map(m => modelRow(m, st)).join("");
-    h += `<div class="meta" style="margin:12px 0 2px"><b>Everything</b> (${all.length} models, by vendor)</div>`;
+    h += `<div class="meta" style="margin:12px 0 2px"><b>全部模型</b>（共 ${all.length} 个，按厂商分组）</div>`;
   } else {
-    h += `<div class="meta" style="margin:4px 0">${shown.length} of ${all.length} models</div>`;
+    h += `<div class="meta" style="margin:4px 0">显示 ${shown.length} / ${all.length} 个模型</div>`;
   }
   const vendors = {};
   shown.forEach(m => (vendors[m.id.split("/")[0]] ??= []).push(m));
   const expand = q || catFilter.free || catFilter.tools;
   h += Object.keys(vendors).sort().map(v => `
     <details ${expand ? "open" : ""}><summary><code>${esc(v)}</code>
-      <span class="meta" style="margin-left:6px">${vendors[v].length}${vendors[v].some(m=>m.free) ? " · has free" : ""}</span></summary>
+      <span class="meta" style="margin-left:6px">${vendors[v].length}${vendors[v].some(m=>m.free) ? " · 提供免费模型" : ""}</span></summary>
       ${vendors[v].map(m => modelRow(m, st)).join("")}
     </details>`).join("");
   list.innerHTML = h;
@@ -156,11 +156,11 @@ function renderCatalogList(){
 async function switchModel(id, asGate){
   const st = (D && D.settings) || {};
   const msg = document.getElementById("free-switch-msg");
-  if (msg) msg.textContent = "switching…";
+  if (msg) msg.textContent = "切换中…";
   const r = await applyModel({provider: st.provider,
     model: asGate ? st.model : id, small_model: asGate ? id : st.small_model});
-  if (msg) msg.textContent = r.error ? ("Error: " + r.error)
-                                     : (asGate ? "Gate model is now " : "Model is now ") + id + ". Applies from your next message.";
+  if (msg) msg.textContent = r.error ? ("错误：" + r.error)
+                                     : (asGate ? "检索门模型已切换为 " : "主模型已切换为 ") + id + "，下条消息开始生效。";
 }
 
 // "Your models" — the curated shortlist the chat pill shows, spanning every
@@ -173,10 +173,10 @@ function yourModelsCard(st){
     <div class="pinrow ${(p.provider===st.provider && p.model===st.model)?"on":""}">
       <span class="mm-prov">${esc(p.provider)}</span>
       <code style="flex:1;word-break:break-all">${esc(p.model)}</code>
-      ${p.default ? `<span class="srcpill" title="this provider's default model">default</span>`
-                  : `<a class="reveal" onclick="pinModel('${esc(p.provider)}','${esc(p.model)}','default')" title="make this ${esc(p.provider)}'s default">make default</a>`}
-      <a class="reveal" onclick="pinModel('${esc(p.provider)}','${esc(p.model)}','unpin')" title="remove from your list">remove</a>
-    </div>`).join("") || `<div class="meta">No models pinned yet — add one below.</div>`;
+      ${p.default ? `<span class="srcpill" title="此 provider 的默认模型">默认</span>`
+                  : `<a class="reveal" onclick="pinModel('${esc(p.provider)}','${esc(p.model)}','default')" title="设为 ${esc(p.provider)} 的默认模型">设为默认</a>`}
+      <a class="reveal" onclick="pinModel('${esc(p.provider)}','${esc(p.model)}','unpin')" title="从列表中移除">移除</a>
+    </div>`).join("") || `<div class="meta">还没有收藏模型，可在下方添加。</div>`;
   // The add row is self-contained: pick any provider + type/choose a model id,
   // then Add. Works even for providers with no live catalog. The datalist
   // suggests the CURRENT provider's models (the only one we've fetched).
@@ -184,15 +184,15 @@ function yourModelsCard(st){
   // Populate the model <select> for the initially-selected provider once the
   // card is in the DOM (a fresh fetch of that provider's catalog).
   setTimeout(() => loadAddModels(st.provider), 0);
-  return `<h2>Your models <span class="meta" style="font-weight:400">— what the chat switcher shows</span></h2>
+  return `<h2>我的模型 <span class="meta" style="font-weight:400">，这些模型会显示在聊天模型切换器中</span></h2>
     <div class="card">
       ${rows}
       <div class="addmodel">
         <select id="add-prov" onfocus="markEditing()" onchange="loadAddModels(this.value)">${provOpts}</select>
-        <select id="add-model"><option value="">loading models…</option></select>
-        <button class="save" onclick="addPinnedModel()">Add</button>
+        <select id="add-model"><option value="">正在加载模型…</option></select>
+        <button class="save" onclick="addPinnedModel()">添加</button>
       </div>
-      <div class="meta" style="margin-top:6px" id="add-msg">Pick a provider, choose a model, then Add.</div>
+      <div class="meta" style="margin-top:6px" id="add-msg">选择 provider 和模型，然后点击“添加”。</div>
     </div>`;
 }
 
@@ -202,21 +202,21 @@ async function loadAddModels(provider){
   const sel = document.getElementById("add-model");
   const msg = document.getElementById("add-msg");
   if (!sel) return;
-  sel.innerHTML = `<option value="">loading ${esc(provider)} models…</option>`;
+  sel.innerHTML = `<option value="">正在加载 ${esc(provider)} 的模型…</option>`;
   let data;
   try { data = await (await fetch("/api/models?provider=" + encodeURIComponent(provider))).json(); }
-  catch(e){ sel.innerHTML = `<option value="">couldn't load — pick another provider</option>`; return; }
+  catch(e){ sel.innerHTML = `<option value="">加载失败，请选择其他 provider</option>`; return; }
   const ms = data.models || [];
-  sel.innerHTML = `<option value="">choose a model…</option>` + ms.map(m => {
-    const meta = [m.free ? "free" : (m.price_out != null ? `$${m.price_in}/$${m.price_out}` : ""),
+  sel.innerHTML = `<option value="">选择模型…</option>` + ms.map(m => {
+    const meta = [m.free ? "免费" : (m.price_out != null ? `$${m.price_in}/$${m.price_out}` : ""),
                   m.context ? Math.round(m.context/1000) + "k" : ""].filter(Boolean).join(" · ");
     return `<option value="${esc(m.id)}">${esc(m.id)}${meta ? "  ("+esc(meta)+")" : ""}</option>`;
   }).join("");
   if (msg) msg.innerHTML = data.listed
-    ? `${ms.length} models on <b>${esc(provider)}</b>. Choose one and Add — or star models in the catalog below.`
+    ? `<b>${esc(provider)}</b> 提供 ${ms.length} 个模型。选择后点击“添加”，也可以在下方模型目录中收藏。`
     : data.error
-      ? `Couldn't list <b>${esc(provider)}</b>: <span style="color:var(--bad)">${esc(data.error)}</span> — showing its defaults only.`
-      : `No live catalog for <b>${esc(provider)}</b> (only its defaults shown). Set its API key to list more.`;
+      ? `无法列出 <b>${esc(provider)}</b> 的模型：<span style="color:var(--bad)">${esc(data.error)}</span>，当前仅显示默认模型。`
+      : `<b>${esc(provider)}</b> 没有可用的在线目录，当前仅显示默认模型。设置 API Key 后可获取更多模型。`;
 }
 
 async function addPinnedModel(){
@@ -230,4 +230,3 @@ async function pinModel(provider, model, action){
   const r = await postJSON("/api/pin", {provider, model, action});
   if (!r.error){ editing = false; await refresh(); }
 }
-

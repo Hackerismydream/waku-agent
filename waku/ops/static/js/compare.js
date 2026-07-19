@@ -9,11 +9,13 @@
 // State survives the 5s refresh redraw (the view rebuilds from here) AND — via
 // localStorage — tab switches and full reloads, so a finished race isn't lost.
 // Kept out of the chat log on purpose: a benchmark isn't a conversation.
-let compareState = { message: "Build a Kanto team around Pikachu — search current picks, remember it, and schedule two training sessions this week.",
+const comparePromptZh = "围绕皮卡丘组建一支关都地区队伍：搜索当前热门选择、记住这支队伍，并在本周安排两次训练。";
+const comparePromptLegacy = "Build a Kanto team around Pikachu — search current picks, remember it, and schedule two training sessions this week.";
+let compareState = { message: comparePromptZh,
                      picked: null, running: false, results: null, order: null, sortBy: "latency" };
 try {
   const saved = JSON.parse(localStorage.getItem("waku_compare") || "null");
-  if (saved){ compareState.message = saved.message ?? compareState.message;
+  if (saved){ compareState.message = saved.message === comparePromptLegacy ? comparePromptZh : (saved.message ?? compareState.message);
               compareState.results = saved.results || null;
               // only restore columns that actually finished (drop any stale racing… ones)
               compareState.order = (saved.order || []).filter(s => saved.results && saved.results[s]); }
@@ -43,7 +45,7 @@ function setBoardSort(key){
   editing = false; render();
 }
 async function clearCompareHistory(){
-  if (!confirm("Clear the compare scoreboard and race history? (Only the arena's own log — your real data is untouched.)")) return;
+  if (!confirm("清空模型对比榜和历史记录？这里只会删除对比区自己的日志，不会影响你的真实数据。")) return;
   const r = await postJSON("/api/compare/clear", {});
   compareState.history = r.runs || []; compareState.aggregate = r.aggregate || [];
   editing = false; render();
@@ -151,44 +153,44 @@ async function runCompare(){
 // reads honestly on camera (the raw error stays below, muted).
 function compareErrorReason(err){
   const e = (err || "").toLowerCase();
-  if (e.includes("reasoning_effort") || e.includes("/v1/responses")) return "can't call tools — reasoning model, needs the /v1/responses API";
-  if (e.includes("thought_signature")) return "can't call tools — missing thought_signature echo";
-  if (e.includes("credit") || e.includes("permission-denied") || e.includes("license")) return "no credits/licenses on this provider";
-  if (e.includes("max_tokens")) return "token-parameter mismatch";
-  if (e.includes("not found") || e.includes("no longer available")) return "model id not available";
+  if (e.includes("reasoning_effort") || e.includes("/v1/responses")) return "无法调用工具：这是推理模型，需要 /v1/responses API";
+  if (e.includes("thought_signature")) return "无法调用工具：缺少 thought_signature 回传";
+  if (e.includes("credit") || e.includes("permission-denied") || e.includes("license")) return "当前 provider 没有可用额度或授权";
+  if (e.includes("max_tokens")) return "token 参数不匹配";
+  if (e.includes("not found") || e.includes("no longer available")) return "模型 ID 不可用";
   return null;
 }
 function compareCol(res){
   if (res.error){
     const why = compareErrorReason(res.error);
     return `<div class="cmp-col err"><div class="cmp-h"><span class="mm-prov">${esc(res.provider)}</span> <code>${esc(res.model)}</code>
-      <span class="srcpill apple">error</span></div>
+      <span class="srcpill apple">错误</span></div>
       ${why?`<div class="meta" style="color:var(--bad)"><b>${esc(why)}</b></div>`:""}
       <div class="meta" style="opacity:.7">${esc(res.error)}</div></div>`;
   }
-  const tools = (res.tools||[]).map(t => `<span class="stage done">tool · ${esc(t.tool)}</span>`).join("");
-  const gateBadgeHtml = `<span class="badge ${res.gate&&res.gate.decision==="retrieve"?"retrieve":""}">gate · ${esc(res.gate?res.gate.decision:"…")}</span>`;
+  const tools = (res.tools||[]).map(t => `<span class="stage done">工具 · ${esc(t.tool)}</span>`).join("");
+  const gateBadgeHtml = `<span class="badge ${res.gate&&res.gate.decision==="retrieve"?"retrieve":""}">检索门 · ${esc(res.gate?gateDecision(res.gate.decision):"…")}</span>`;
   if (res.streaming){
     return `<div class="cmp-col">
       <div class="cmp-h"><span class="mm-prov">${esc(res.provider)}</span> <code>${esc(res.model)}</code>
         <span class="live-dot"></span></div>
       <div class="cmp-stats">${gateBadgeHtml}</div>
       ${tools?`<div class="stages" style="flex-wrap:wrap">${tools}</div>`:""}
-      <div class="meta">${(res.tools||[]).length?"running tools…":"thinking…"} <span class="caret"></span></div>
+      <div class="meta">${(res.tools||[]).length?"正在运行工具…":"思考中…"} <span class="caret"></span></div>
     </div>`;
   }
   const c = res.completion;
-  const completionBadge = c ? `<span class="cmp-score ${c.passed?"pass":"fail"}" title="${esc(c.why||"")}">${c.passed?"solved":"failed"}${c.passed?"":" · "+esc(c.why||"")}</span>` : "";
+  const completionBadge = c ? `<span class="cmp-score ${c.passed?"pass":"fail"}" title="${esc(c.why||"")}">${c.passed?"完成":"失败"}${c.passed?"":" · "+esc(c.why||"")}</span>` : "";
   const q = res.quality;
-  const qualityBadge = q && q.score!=null ? `<span class="cmp-q ${q.score>=7?"hi":q.score>=4?"mid":"lo"}" title="${esc(q.reason||"")} — judge: ${esc(q.judge||"")}">K3 ${q.score}/10</span>` : "";
+  const qualityBadge = q && q.score!=null ? `<span class="cmp-q ${q.score>=7?"hi":q.score>=4?"mid":"lo"}" title="${esc(q.reason||"")}，评分模型：${esc(q.judge||"")}">K3 ${q.score}/10</span>` : "";
   return `<div class="cmp-col${c?(c.passed?" solved":" failed"):""}">
     <div class="cmp-h"><span class="mm-prov">${esc(res.provider)}</span> <code>${esc(res.model)}</code>${completionBadge}${qualityBadge}</div>
     <div class="cmp-stats">
       ${gateBadgeHtml}
       <span class="chip ${compareState.sortBy==="latency"?"sorted":""}">${secs(res.latency_ms)}</span>
-      <span class="chip">${res.iterations??"?"} iter</span>
+      <span class="chip">${res.iterations??"?"} 轮</span>
       <span class="chip ${compareState.sortBy==="cost"?"money":""}">${money(res.cost_usd||0)}</span>
-      <span class="chip ${compareState.sortBy==="tokens"?"sorted":""}">${(res.tokens_in||0)+(res.tokens_out||0)} tok</span>
+      <span class="chip ${compareState.sortBy==="tokens"?"sorted":""}">${(res.tokens_in||0)+(res.tokens_out||0)} token</span>
     </div>
     ${tools?`<div class="stages" style="flex-wrap:wrap">${tools}</div>`:""}
     <div class="r cmp-reply">${renderMarkdown(res.reply||"")}</div>
@@ -201,7 +203,7 @@ VIEWS.compare = function(d){
     const spec = `${p.provider}:${p.model}`, on = compareState.picked.has(spec);
     return `<label class="cmp-pick ${on?"on":""}"><input type="checkbox" ${on?"checked":""}
       onchange="toggleCompareModel('${esc(spec)}')"> <span class="mm-prov">${esc(p.provider)}</span> ${esc(p.model)}</label>`;
-  }).join("") : `<div class="meta">No models pinned yet — add some in Settings.</div>`;
+  }).join("") : `<div class="meta">还没有收藏模型，请先到“设置”中添加。</div>`;
   const n = compareState.picked ? compareState.picked.size : 0;
 
   // One column per raced model, in order. Each shows "racing…" until its result
@@ -219,14 +221,14 @@ VIEWS.compare = function(d){
                      cost:    r => r.cost_usd || 0,
                      tokens:  r => (r.tokens_in || 0) + (r.tokens_out || 0) };
     const key = metric[compareState.sortBy] || metric.latency;
-    const sorters = [["latency", "seconds"], ["tokens", "tokens"], ["cost", "money"]];
+    const sorters = [["latency", "耗时"], ["tokens", "Token"], ["cost", "费用"]];
     // Prominent, tab-like sort buttons — the selected one is highlighted.
-    const sortBar = done.length ? `<div class="cmp-sortbar">sort by ${sorters.map(([k, label]) =>
+    const sortBar = done.length ? `<div class="cmp-sortbar">排序方式：${sorters.map(([k, label]) =>
       `<button class="cmp-sortbtn ${compareState.sortBy === k ? "on" : ""}" onclick="setCompareSort('${k}')">${label}</button>`).join("")}</div>` : "";
     // Only a progress line while the race is still running; once every column is
     // in, the sort tabs + cards + scoreboard say it all (no redundant summary).
     const summary = done.length < order.length
-      ? `Racing ${order.length} models — ${done.length}/${order.length} done`
+      ? `正在对比 ${order.length} 个模型，已完成 ${done.length}/${order.length}`
       : "";
     // Rank finished models first (by the chosen metric), then still-running,
     // then errors — so as the race resolves, the best rises to the top-left.
@@ -242,7 +244,7 @@ VIEWS.compare = function(d){
       const r = results[s];
       if (r) return compareCol(r);
       return `<div class="cmp-col"><div class="cmp-h"><span class="mm-prov">${esc(s.split(":")[0])}</span> <code>${esc(s.split(":").slice(1).join(":"))}</code></div>
-        <div class="meta">racing… <span class="caret"></span></div></div>`;
+        <div class="meta">对比中… <span class="caret"></span></div></div>`;
     }).join("");
     grid = `${summary ? `<div class="meta" style="margin:2px 0 6px">${summary}</div>` : ""}${sortBar}<div class="cmp-grid">${cols}</div>`
       + (compareState.raceError ? `<div class="meta" style="color:var(--bad)">${esc(compareState.raceError)}</div>` : "");
@@ -254,11 +256,11 @@ VIEWS.compare = function(d){
 
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
-      <span class="meta">One message, every brain at once — same harness, isolated homes, real receipts (gate · latency · cost · tools). Compare, don't guess.</span>
-      <label class="cmp-judge ${compareState.judge?"on":""}" style="margin-left:auto" title="Grade each reply 0-10 with kimi-k3 (one extra API call per column)">
-        <input type="checkbox" ${compareState.judge?"checked":""} onchange="toggleJudge()"> grade with K3</label>
+      <span class="meta">同一条消息，同时交给多个模型。它们使用相同的运行框架和彼此隔离的临时数据，并展示检索门、耗时、费用与工具调用。</span>
+      <label class="cmp-judge ${compareState.judge?"on":""}" style="margin-left:auto" title="使用 kimi-k3 为每个回复打 0 到 10 分，每列会增加一次 API 调用">
+        <input type="checkbox" ${compareState.judge?"checked":""} onchange="toggleJudge()"> 使用 K3 评分</label>
       <button class="save cmp-race" onclick="runCompare()" ${(!n||compareState.running)?"disabled":""}>
-        ${compareState.running?"Racing…":`Race ${n} model${n===1?"":"s"}`}</button>
+        ${compareState.running?"对比中…":`对比 ${n} 个模型`}</button>
     </div>
     <textarea id="cmp-msg" class="cmp-input" rows="2" onfocus="markEditing()"
       oninput="compareState.message=this.value">${esc(compareState.message)}</textarea>
@@ -331,13 +333,13 @@ function costQualityScatter(agg){
       <text x="${(px(p.x)+9).toFixed(1)}" y="${(py(p.y)+3).toFixed(1)}" class="sc-lbl">${esc(p.a.model)} · ${money(p.x)}</text>`;
   }).join("");
   return `<div class="card" style="padding:12px 14px;margin-top:14px">
-    <div class="meta" style="margin-bottom:4px">Cost vs ${useQ?"quality (K3 grade)":"completion"} — cheap &amp; good is top-left</div>
+    <div class="meta" style="margin-bottom:4px">总费用与${useQ?"质量（K3 评分）":"完成度"}，越靠左上代表成本越低、结果越好</div>
     <svg viewBox="0 0 ${W} ${H}" class="scatter" preserveAspectRatio="xMidYMid meet">
       <line x1="${L}" y1="${T}" x2="${L}" y2="${H-B}" class="sc-axis"/>
       <line x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}" class="sc-axis"/>
       ${gr}${dots}
-      <text x="${(L+(W-R-L)/2).toFixed(0)}" y="${H-6}" class="sc-tick" text-anchor="middle">total cost →</text>
-      <text x="14" y="${(T+(H-B-T)/2).toFixed(0)}" class="sc-tick" text-anchor="middle" transform="rotate(-90 14 ${(T+(H-B-T)/2).toFixed(0)})">${useQ?"K3 grade":"completion"} →</text>
+      <text x="${(L+(W-R-L)/2).toFixed(0)}" y="${H-6}" class="sc-tick" text-anchor="middle">总费用 →</text>
+      <text x="14" y="${(T+(H-B-T)/2).toFixed(0)}" class="sc-tick" text-anchor="middle" transform="rotate(-90 14 ${(T+(H-B-T)/2).toFixed(0)})">${useQ?"K3 评分":"完成度"} →</text>
     </svg></div>`;
 }
 function compareHistoryHtml(){
@@ -352,12 +354,12 @@ function compareHistoryHtml(){
   const th = (k, label) => `<th class="cmp-th ${bs.key===k?"on":""}" onclick="setBoardSort('${k}')">${label}${arrow(k)}</th>`;
   const rows = [...agg].sort((x, y) => ((x[bs.key] ?? 0) - (y[bs.key] ?? 0)) * (bs.dir === "asc" ? 1 : -1));
   const scoreboard = agg.length ? `
-    <h2 style="margin-top:22px;display:flex;align-items:center;gap:10px">Scoreboard
-      <span class="meta" style="font-weight:400">— totals across ${raceCount} race${raceCount===1?"":"s"}</span>
-      <a class="reveal" style="margin-left:auto;font-size:12px" onclick="clearCompareHistory()">clear</a></h2>
+    <h2 style="margin-top:22px;display:flex;align-items:center;gap:10px">汇总榜
+      <span class="meta" style="font-weight:400">共 ${raceCount} 次对比</span>
+      <a class="reveal" style="margin-left:auto;font-size:12px" onclick="clearCompareHistory()">清空</a></h2>
     ${costQualityScatter(agg)}
     <div class="card" style="padding:4px 8px"><table>
-      <tr><th>model</th>${th("cases_passed","solved")}${th("quality_avg","K3 grade")}${th("runs","races")}<th>ok</th>${th("total_latency_ms","total time")}${th("total_tokens_in","in tok")}${th("total_tokens_out","out tok")}${th("total_tokens","total tok")}<th title="list price per million tokens, input / output">rate $/M</th>${th("total_cost_usd","total cost")}</tr>
+      <tr><th>模型</th>${th("cases_passed","完成")}${th("quality_avg","K3 评分")}${th("runs","次数")}<th>正常</th>${th("total_latency_ms","总耗时")}${th("total_tokens_in","输入 token")}${th("total_tokens_out","输出 token")}${th("total_tokens","总 token")}<th title="每百万 token 的公开价格，输入 / 输出">费率 $/M</th>${th("total_cost_usd","总费用")}</tr>
       ${rows.map(a=>`<tr>
         <td><span class="mm-prov">${esc(a.provider)}</span> <code>${esc(a.model)}</code></td>
         <td>${a.cases_scored?`<span class="cmp-score ${a.cases_passed===a.cases_scored?"pass":(a.cases_passed?"part":"fail")}">${a.cases_passed}/${a.cases_scored}</span>`:'<span class="meta">—</span>'}</td>
@@ -370,11 +372,11 @@ function compareHistoryHtml(){
         <td class="meta" style="color:var(--good)">${money(a.total_cost_usd)}</td></tr>`).join("")}
     </table></div>` : "";
   const recent = hist.length ? `
-    <h2 style="margin-top:18px">Recent races <span class="meta" style="font-weight:400">— click to reopen</span></h2>
+    <h2 style="margin-top:18px">最近对比 <span class="meta" style="font-weight:400">点击即可重新查看</span></h2>
     <div class="card">${hist.map((run,i)=>`
       <div class="pinrow" style="cursor:pointer" onclick="openCompareRun(${i})">
         <code style="flex:1;word-break:break-all">${esc((run.message||"").slice(0,90))}</code>
-        <span class="meta" style="white-space:nowrap">${(run.results||[]).length} models · ${esc((run.ts||"").slice(0,16).replace("T"," "))}</span>
+        <span class="meta" style="white-space:nowrap">${(run.results||[]).length} 个模型 · ${esc((run.ts||"").slice(0,16).replace("T"," "))}</span>
       </div>`).join("")}</div>` : "";
   return scoreboard + recent;
 }

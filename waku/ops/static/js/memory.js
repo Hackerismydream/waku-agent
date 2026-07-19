@@ -8,7 +8,7 @@ function editFact(id){
   const cell = row.querySelector(".fc"); const cur = cell.textContent;
   cell.innerHTML = `<textarea class="editor" id="ef-${id}">${cur.replace(/</g,"&lt;")}</textarea>`;
   const act = row.lastElementChild;
-  act.innerHTML = `<a class="reveal" onclick="saveFact(${id})">save</a> · <a class="reveal" onclick="editing=false;refresh()">cancel</a>`;
+  act.innerHTML = `<a class="reveal" onclick="saveFact(${id})">保存</a> · <a class="reveal" onclick="editing=false;refresh()">取消</a>`;
   document.getElementById("ef-"+id).focus();
 }
 async function saveFact(id){
@@ -17,7 +17,7 @@ async function saveFact(id){
   editing = false; refresh();
 }
 async function delMem(action, id){
-  if(!confirm("Delete this from memory?")) return;
+  if(!confirm("确定要从记忆中删除这条内容吗？")) return;
   await postJSON("/api/memory", {action, id});
   refresh();
 }
@@ -26,12 +26,12 @@ function dirty(btnId){ editing = true; const b = document.getElementById(btnId);
 async function saveSoul(){
   const v = document.getElementById("soul").value;
   const r = await postJSON("/api/memory", {action:"save_soul", content:v});
-  document.getElementById("soul-msg").textContent = r.error ? ("Error: "+r.error) : "Saved — live next turn.";
+  document.getElementById("soul-msg").textContent = r.error ? ("错误："+r.error) : "已保存，下轮对话生效。";
   if (!r.error){ const b=document.getElementById("soul-save"); if(b) b.disabled=true; editing=false; }
 }
 async function saveSkill(i){
   const ta = document.getElementById("sk-"+i);
   const r = await postJSON("/api/memory", {action:"save_skill", path:ta.dataset.path, content:ta.value});
-  document.getElementById("skmsg-"+i).textContent = r.error ? ("Error: "+r.error) : "Saved — live next turn.";
+  document.getElementById("skmsg-"+i).textContent = r.error ? ("错误："+r.error) : "已保存，下轮对话生效。";
   if (!r.error){ const b=document.getElementById("sksave-"+i); if(b) b.disabled=true; editing=false; }
 }

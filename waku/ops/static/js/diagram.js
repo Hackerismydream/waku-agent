@@ -27,72 +27,72 @@ function archSVG(d){
     <!-- HARNESS container: everything runs on your laptop, including the
          offline LLM Ops loop (tinted sub-panel) -->
     <rect class="container" x="12" y="20" width="1020" height="628" rx="16"/>
-    ${lbl(16,4,"HARNESS — runs on your laptop · the turn inside is ephemeral")}
+    ${lbl(16,4,"运行框架：全部运行在你的电脑上，每轮对话临时组装")}
 
     <!-- the turn: gateway → working memory → loop → reply -->
-    ${box(32,72,128,56,"Gateway","cli · voice · web","chat","","gateway")}
+    ${box(32,72,128,56,"会话入口","终端 · 语音 · 网页","chat","","gateway")}
     ${flow("M160 100 L192 100","","e-gw-wm")}
-    ${box(192,72,144,56,"Working memory","assembled per turn","memory/overview","","wm")}
+    ${box(192,72,144,56,"工作记忆","每轮对话重新组装","memory/overview","","wm")}
 
     <rect class="loopbox" x="370" y="56" width="168" height="166" rx="12"/>
-    ${lbl(384,48,"LOOP")}
-    ${box(384,72,140,50,"LLM agent","reason","loop","","llm")}
-    ${box(384,152,140,52,"Tools","create_event…","tools","","tools")}
+    ${lbl(384,48,"智能循环")}
+    ${box(384,72,140,50,"LLM 智能体","推理","loop","","llm")}
+    ${box(384,152,140,52,"工具","create_event…","tools","","tools")}
     ${flow("M448 122 L448 152")}${flow("M470 152 L470 122")}
-    ${flowLbl(456,141,"act")}
+    ${flowLbl(456,141,"行动")}
     ${flow("M336 100 L370 100","","e-wm-loop")}
-    ${flow("M538 100 L558 106")}${flowLbl(542,93,"reply")}
-    ${box(558,84,104,52,"Reply","→ back to you","loop","","reply")}
+    ${flow("M538 100 L558 106")}${flowLbl(542,93,"回复")}
+    ${box(558,84,104,52,"回复","返回给你","loop","","reply")}
     <!-- The gateway is the door IN and OUT: the reply leaves through the very
          gateway it arrived at (Telegram sends it, the CLI prints it, voice
          speaks it, the dashboard streams it). A clean over-the-top arc. -->
     <path class="flow" data-edge="e-reply-gw" d="M610 84 C610 40 596 34 566 34 L130 34 C104 34 96 44 96 72" marker-end="url(#arr)"/>
-    ${flowLbl(348,28,"reply, out the same gateway","middle")}
+    ${flowLbl(348,28,"从原入口返回回复","middle")}
     <!-- every turn is saved for consolidation: down a clear right lane,
          then left into the consolidation box -->
     <path class="flow dash" data-edge="e-reply-save" d="M650 136 C660 150 660 200 660 600 L430 600" marker-end="url(#arr)"/>
-    ${flowLbl(668,214,"save chats",'start')}
+    ${flowLbl(668,214,"保存对话",'start')}
 
     <!-- retrieval gate feeding working memory (the hero) -->
     <path class="gate node" data-node="gate" onclick="location.hash='memory/overview'" d="M264 250 L340 296 L264 342 L188 296 Z"/>
-    <text class="nt" x="264" y="292" text-anchor="middle" style="pointer-events:none">Retrieval gate</text>
-    <text class="ns" x="264" y="310" text-anchor="middle" style="pointer-events:none">${s.gate_skips} skip · ${s.gate_retrieves} retrieve</text>
-    ${flow("M264 250 L264 128","dash","e-gate-wm")}${flowLbl(274,196,"only if needed")}
+    <text class="nt" x="264" y="292" text-anchor="middle" style="pointer-events:none">记忆检索门</text>
+    <text class="ns" x="264" y="310" text-anchor="middle" style="pointer-events:none">${s.gate_skips} 次跳过 · ${s.gate_retrieves} 次检索</text>
+    ${flow("M264 250 L264 128","dash","e-gate-wm")}${flowLbl(274,196,"仅在需要时读取")}
 
     <!-- MEMORY: grouped section with a direct link from the gate to each pillar -->
-    ${lbl(40,404,"MEMORY — three pillars")}
+    ${lbl(40,404,"记忆：三大支柱")}
     <rect class="memgroup" x="28" y="414" width="600" height="128" rx="12"/>
     ${flow("M148 452 L246 336","dash","e-gate-proc")}
     ${flow("M340 452 L272 344","dash","e-gate-sem")}
     ${flow("M542 452 L286 338","dash","e-gate-epi")}
-    ${flowLbl(356,392,"the gate reads all three",'middle')}
-    ${box(44,452,208,72,"Procedural","how to act · SKILL.md · "+d.skills.length+" skill(s)","memory/skills","","procedural")}
-    ${box(264,452,204,72,"Semantic · FTS5","durable facts · "+d.facts.length+" facts","memory/semantic","","semantic")}
-    ${box(480,452,132,72,"Episodic",d.episodes.length+" episodes","memory/episodic","","episodic")}
+    ${flowLbl(356,392,"检索门读取三类记忆",'middle')}
+    ${box(44,452,208,72,"程序性记忆","如何行动 · SKILL.md · "+d.skills.length+" 项技能","memory/skills","","procedural")}
+    ${box(264,452,204,72,"语义记忆 · FTS5","长期事实 · "+d.facts.length+" 条","memory/semantic","","semantic")}
+    ${box(480,452,132,72,"情景记忆",d.episodes.length+" 条摘要","memory/episodic","","episodic")}
 
     <!-- consolidation writes back into memory -->
-    ${box(44,576,384,52,"Consolidation · every "+d.consolidate_every+" exchanges",d.chat_pending+"/"+d.consolidate_every*2+" queued → distilled into facts","memory/consolidation","","consolidation")}
-    ${flow("M340 576 L340 528","","e-consol-sem")}${flowLbl(350,560,"distill")}
+    ${box(44,576,384,52,"记忆归纳 · 每 "+d.consolidate_every+" 轮对话",d.chat_pending+"/"+d.consolidate_every*2+" 条待处理，归纳为长期事实","memory/consolidation","","consolidation")}
+    ${flow("M340 576 L340 528","","e-consol-sem")}${flowLbl(350,560,"归纳")}
 
     <!-- LLM OPS: the offline improvement loop — inside the harness (it all
          runs on the laptop) but a distinct tinted sub-panel -->
     <rect class="container ops" x="736" y="40" width="280" height="372" rx="14"/>
-    ${lbl(752,64,"LLM OPS — offline improvement loop")}
-    ${flowLbl(752,80,"observes each run · improves the agent",'start')}
+    ${lbl(752,64,"LLM 运维：离线改进循环")}
+    ${flowLbl(752,80,"观察每次运行，持续改进智能体",'start')}
     <!-- every turn crosses the gap to feed the trace -->
     <path class="flow" data-edge="e-reply-trace" d="M660 104 C700 100 726 100 752 106" marker-end="url(#arr)"/>
-    ${flowLbl(688,96,"each turn")}
-    ${box(752,92,250,50,"Trace",s.trace_files+" file(s) · always on","ops","","trace")}
+    ${flowLbl(688,96,"每轮对话")}
+    ${box(752,92,250,50,"追踪",s.trace_files+" 个文件 · 始终开启","ops","","trace")}
     ${flow("M878 142 L878 156")}
-    ${box(752,156,250,50,"Eval","deterministic + judge","ops")}
+    ${box(752,156,250,50,"评测","确定性测试 + 模型裁判","ops")}
     ${flow("M878 206 L878 220")}
-    ${box(752,220,250,50,"Release gate",d.eval_report?"det "+d.eval_report.deterministic+" · judge "+d.eval_report.judge:"run make gate","ops")}
+    ${box(752,220,250,50,"发布门",d.eval_report?"确定性 "+evalStatus(d.eval_report.deterministic)+" · 裁判 "+evalStatus(d.eval_report.judge):"运行 make gate","ops")}
     ${flow("M878 270 L878 284")}
-    ${box(752,284,250,50,"Release","new prompt · model · config","ops")}
+    ${box(752,284,250,50,"发布","新提示词 · 模型 · 配置","ops")}
     <!-- feedback: Release improves the Harness — a short arrow across the gap,
          so the outer loop closes without a long wrap crowding the margins -->
     <path class="flow dash" d="M752 312 C712 324 698 352 676 358" marker-end="url(#arr)"/>
-    ${flowLbl(596,346,"improved prompt + config",'end')}
+    ${flowLbl(596,346,"改进提示词与配置",'end')}
   </svg></div>`;
 }
 
@@ -103,12 +103,12 @@ function archSVG(d){
 // this file). test_static_assets.py won't catch a mismatch here; the animation
 // just silently stops lighting a box.
 const STAGE = {
-  turn_start:    {nodes:["gateway","wm"],            edges:["e-gw-wm"],                 label:"message in"},
-  gate:          {nodes:["gate"],                    edges:["e-gate-wm"],               label:"retrieval gate"},
-  llm:           {nodes:["llm"],                     edges:["e-wm-loop"],               label:"agent reasons"},
-  tool:          {nodes:["tools"],                   edges:[],                          label:"tool runs"},
-  turn_end:      {nodes:["reply","trace"],           edges:["e-reply-trace","e-reply-save"], label:"reply"},
-  consolidation: {nodes:["consolidation","semantic"],edges:["e-consol-sem"],            label:"consolidating memory"},
+  turn_start:    {nodes:["gateway","wm"],            edges:["e-gw-wm"],                 label:"收到消息"},
+  gate:          {nodes:["gate"],                    edges:["e-gate-wm"],               label:"判断是否读取记忆"},
+  llm:           {nodes:["llm"],                     edges:["e-wm-loop"],               label:"智能体正在推理"},
+  tool:          {nodes:["tools"],                   edges:[],                          label:"正在运行工具"},
+  turn_end:      {nodes:["reply","trace"],           edges:["e-reply-trace","e-reply-save"], label:"正在回复"},
+  consolidation: {nodes:["consolidation","semantic"],edges:["e-consol-sem"],            label:"正在归纳记忆"},
 };
 let evCursor = null, evQueue = [], playing = false, animating = false;
 
@@ -146,4 +146,3 @@ async function pollEvents(){
     evCursor = r.cursor;
   } catch(e){ /* server busy */ }
 }
-

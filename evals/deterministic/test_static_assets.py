@@ -68,3 +68,15 @@ def test_app_js_is_gone():
     """The monolith was split; index.html must not load the old single file."""
     assert not (STATIC / "app.js").exists(), "stale app.js still present"
     assert "/static/app.js" not in INDEX, "index.html still references app.js"
+
+
+def test_dashboard_chinese_locale_and_core_copy_are_present():
+    """The dashboard is intentionally Chinese-first; guard the visible shell
+    and dynamic copy against an accidental English-only regression."""
+    assert '<html lang="zh-CN">' in INDEX
+    for label in ("总览", "会话入口", "智能循环", "记忆", "工具", "数据库", "运行与评测", "模型对比", "设置"):
+        assert label in INDEX
+    assert "给 Waku 发消息" in INDEX
+    assert "记忆检索门" in JS_SRC
+    assert "模型目录：点击即可切换" in JS_SRC
+    assert "这里还没有内容" in JS_SRC
