@@ -118,6 +118,12 @@ def test_judge_context_contains_trusted_fixtures_and_observed_artifacts():
     case = {
         "setup": {
             "clock": "2026-07-19T12:00:00+08:00",
+            "exchanges": [
+                {
+                    "user": "The fallback venue is Harbor Hall.",
+                    "assistant": "Understood.",
+                }
+            ],
             "search_results": [
                 {
                     "query_contains": "Python 3.14",
@@ -154,6 +160,7 @@ def test_judge_context_contains_trusted_fixtures_and_observed_artifacts():
     assert trusted["frozen_search_results"][0]["results"][0]["url"].endswith(
         "pep-0745/"
     )
+    assert trusted["seeded_exchanges"][0]["user"].endswith("Harbor Hall.")
     assert evidence["artifacts"]["outbox"][0]["body"].startswith("Python 3.14")
 
 
@@ -444,6 +451,10 @@ def test_summary_keeps_judge_denominator_and_cost_separate():
 
     assert summary["models"][spec.raw]["judge_evaluated"] == 1
     assert summary["judge_estimated_cost_usd"] == 0.002
+    assert summary["end_to_end_rate"] == 1.0
+    assert summary["latency_ms"] == {"mean": 25, "p50": 25, "p95": 25}
+    assert summary["cost"]["eval_estimated_usd"] == 0.003
+    assert summary["stability"]["judge_gated_all_trials_passed"] == 1
     assert "| anthropic:model-a | 1/1 | 1/1" in markdown
     assert "$0.002000" in markdown
 

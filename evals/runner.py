@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 import platform
 import subprocess
@@ -415,6 +416,7 @@ def _judge_ground_truth(spec: ModelSpec, model: str, case: dict) -> str:
         "seeded_events": setup.get("events", []),
         "seeded_outbox": setup.get("outbox", []),
         "seeded_skills": setup.get("skills", []),
+        "seeded_exchanges": setup.get("exchanges", []),
         "frozen_search_results": setup.get("search_results", []),
     }
     return json.dumps(verified, ensure_ascii=False)
@@ -636,6 +638,45 @@ def summarize(receipts: list[dict]) -> dict:
         sum(row.get("verdict", {}).get("overall") == "pass" for row in judged)
         if judged else None
     )
+    latencies = sorted(
+        int(row.get("latency_ms", 0))
+        for row in receipts
+        if isinstance(row.get("latency_ms"), (int, float))
+    )
+
+    def percentile(values: list[int], fraction: float) -> int:
+        if not values:
+            return 0
+        index = max(0, min(len(values) - 1, math.ceil(len(values) * fraction) - 1))
+        return values[index]
+
+    agent_cost = sum(row.get("cost", {}).get("estimated_usd", 0) for row in receipts)
+    judge_cost = sum(
+        (row.get("judge_result") or {}).get("estimated_cost_usd", 0)
+        for row in receipts
+    )
+    pair_groups: dict[tuple[str, str], list[dict]] = {}
+    for row in receipts:
+        key = (row["model"]["spec"], row["case_id"])
+        pair_groups.setdefault(key, []).append(row)
+    pair_sizes = [len(rows) for rows in pair_groups.values()]
+    deterministic_stable = sum(
+        all(row.get("verdict", {}).get("deterministic") == "pass" for row in rows)
+        for rows in pair_groups.values()
+    )
+    judged_pairs = [
+        rows
+        for rows in pair_groups.values()
+        if all(row.get("verdict", {}).get("judge") in {"pass", "fail"} for row in rows)
+    ]
+    judge_gated_stable = (
+        sum(
+            all(row.get("verdict", {}).get("overall") == "pass" for row in rows)
+            for rows in judged_pairs
+        )
+        if judged_pairs
+        else None
+    )
 
     def group(field: str) -> dict:
         groups = {}
@@ -699,13 +740,39 @@ def summarize(receipts: list[dict]) -> dict:
         ),
         "semantic_passes": semantic_passes,
         "execution_errors": sum(row.get("error") is not None for row in receipts),
-        "judge_estimated_cost_usd": round(
-            sum(
-                (row.get("judge_result") or {}).get("estimated_cost_usd", 0)
-                for row in receipts
-            ),
-            6,
+        "end_to_end_passes": semantic_passes,
+        "end_to_end_rate": (
+            round(semantic_passes / len(judged), 4) if judged and semantic_passes is not None else None
         ),
+        "latency_ms": {
+            "mean": round(sum(latencies) / len(latencies)) if latencies else 0,
+            "p50": percentile(latencies, 0.50),
+            "p95": percentile(latencies, 0.95),
+        },
+        "cost": {
+            "agent_estimated_usd": round(agent_cost, 6),
+            "judge_estimated_usd": round(judge_cost, 6),
+            "eval_estimated_usd": round(agent_cost + judge_cost, 6),
+            "agent_per_deterministic_pass_usd": (
+                round(agent_cost / deterministic_passes, 6) if deterministic_passes else None
+            ),
+            "eval_per_end_to_end_pass_usd": (
+                round((agent_cost + judge_cost) / semantic_passes, 6)
+                if semantic_passes
+                else None
+            ),
+        },
+        "stability": {
+            "task_model_pairs": len(pair_groups),
+            "trials_per_pair": {
+                "min": min(pair_sizes) if pair_sizes else 0,
+                "max": max(pair_sizes) if pair_sizes else 0,
+            },
+            "deterministic_all_trials_passed": deterministic_stable,
+            "judge_gated_pairs": len(judged_pairs),
+            "judge_gated_all_trials_passed": judge_gated_stable,
+        },
+        "judge_estimated_cost_usd": round(judge_cost, 6),
         "failures_by_category": dict(sorted(failure_counts.items())),
         "models": model_groups,
         "splits": group("split"),
@@ -730,10 +797,13 @@ def _summary_markdown(summary: dict) -> str:
         f"- Deterministic passes: {summary['deterministic_passes']}/{summary['attempts']}",
         f"- Judge-evaluated attempts: {summary['judge_evaluated']}",
         f"- Judge errors: {summary['judge_errors']}",
-        f"- Semantic passes: {summary['semantic_passes'] if summary['semantic_passes'] is not None else 'not evaluated'}",
+        f"- Judge-gated passes: {summary['end_to_end_passes'] if summary['end_to_end_passes'] is not None else 'not evaluated'}",
         f"- Execution errors: {summary['execution_errors']}",
+        f"- Latency P50 / P95: {summary['latency_ms']['p50']} / {summary['latency_ms']['p95']} ms",
+        f"- Stable task-model pairs: {summary['stability']['judge_gated_all_trials_passed'] if summary['stability']['judge_gated_all_trials_passed'] is not None else summary['stability']['deterministic_all_trials_passed']}/{summary['stability']['task_model_pairs']}",
+        f"- Total estimated eval cost: ${summary['cost']['eval_estimated_usd']:.6f}",
         "",
-        "| model | deterministic | semantic | errors | agent est. cost | judge est. cost |",
+        "| model | deterministic | judge-gated | errors | agent est. cost | judge est. cost |",
         "|---|---:|---:|---:|---:|---:|",
     ]
     for model, row in summary["models"].items():

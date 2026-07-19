@@ -62,7 +62,13 @@ _STATE_RECORD_FIELDS = {
     "skills": {"name", "description", "body"},
     "chat": {"role", "content", "session_id"},
 }
-_RECORD_SUFFIXES = ("_not_contains", "_contains", "_one_of", "_equals")
+_RECORD_SUFFIXES = (
+    "_not_contains",
+    "_contains_any",
+    "_contains",
+    "_one_of",
+    "_equals",
+)
 
 
 def load_cases(path: Path | None = None) -> list[dict]:
@@ -122,6 +128,16 @@ def validate_suite(cases: list[dict], *, expected_count: int = 40) -> None:
                 raise ValueError(f"{case['id']}: every expect.calls tool must be in tool_path")
             if not isinstance(call.get("args_contains", {}), dict):
                 raise ValueError(f"{case['id']}: expect.calls.args_contains must be an object")
+            if not isinstance(call.get("args_contains_any", {}), dict):
+                raise ValueError(
+                    f"{case['id']}: expect.calls.args_contains_any must be an object"
+                )
+            for field, alternatives in call.get("args_contains_any", {}).items():
+                if not isinstance(alternatives, list) or not alternatives:
+                    raise ValueError(
+                        f"{case['id']}: expect.calls.args_contains_any[{field}] "
+                        "must be a non-empty list"
+                    )
             if not isinstance(call.get("args_equals", {}), dict):
                 raise ValueError(f"{case['id']}: expect.calls.args_equals must be an object")
         expected_state = expect.get("state", {})
@@ -164,6 +180,10 @@ def validate_suite(cases: list[dict], *, expected_count: int = 40) -> None:
                         ):
                             raise ValueError(
                                 f"{case['id']}: {record_assertion} must be text or a list"
+                            )
+                        if suffix == "_contains_any" and not isinstance(value, list):
+                            raise ValueError(
+                                f"{case['id']}: {record_assertion} must be a list"
                             )
                         if isinstance(value, list) and not value:
                             raise ValueError(
@@ -322,6 +342,12 @@ def _args_error(expected_calls: list[dict], tool_calls: list[dict]) -> str | Non
         for key, needle in expected.get("args_contains", {}).items():
             if str(needle).lower() not in str(args.get(key, "")).lower():
                 return f"'{needle}' not in args[{key}] for {tool}"
+        for key, alternatives in expected.get("args_contains_any", {}).items():
+            actual = str(args.get(key, "")).casefold()
+            if not any(str(candidate).casefold() in actual for candidate in alternatives):
+                return (
+                    f"none of {alternatives!r} found in args[{key}] for {tool}"
+                )
         for key, wanted in expected.get("args_equals", {}).items():
             actual = args.get(key)
             if not _same_value(actual, wanted):
@@ -363,6 +389,10 @@ def _record_matches(record: dict, expected: dict) -> bool:
             continue
         text = str(actual or "").casefold()
         needles = wanted if isinstance(wanted, list) else [wanted]
+        if suffix == "_contains_any" and not any(
+            str(needle).casefold() in text for needle in needles
+        ):
+            return False
         if suffix == "_contains" and not all(
             str(needle).casefold() in text for needle in needles
         ):

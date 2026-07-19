@@ -188,6 +188,38 @@ def test_structured_state_one_of_accepts_only_an_explicit_alternative():
     assert not ok and "facts" in why
 
 
+def test_contains_any_accepts_equivalent_argument_and_state_phrasings():
+    case = {
+        "expect": {
+            "tool_path": ["send_message"],
+            "calls": [
+                {
+                    "tool": "send_message",
+                    "args_contains_any": {"body": ["16:00", "4:00 PM"]},
+                }
+            ],
+            "state": {
+                "outbox_matches": [
+                    {"body_contains_any": ["16:00", "4:00 PM"]}
+                ]
+            },
+        }
+    }
+    calls = [{"tool": "send_message", "args": {"body": "Demo at 4:00 PM"}}]
+
+    assert scoring.check_case(
+        case,
+        calls,
+        state={"outbox": [{"body": "Demo at 4:00 PM"}]},
+    ) == (True, "ok")
+    ok, why = scoring.check_case(
+        case,
+        [{"tool": "send_message", "args": {"body": "Demo tomorrow"}}],
+        state={"outbox": [{"body": "Demo tomorrow"}]},
+    )
+    assert not ok and "args[body]" in why
+
+
 def test_reply_max_chars_is_checked_deterministically():
     case = {
         "expect": {
@@ -350,11 +382,17 @@ def test_web_business_results_are_pinned_beyond_a_source_url():
     }
 
 
-def test_first_person_preferences_require_a_user_owned_fact():
+def test_first_person_preferences_accept_user_or_topic_owned_fact_subjects():
     cases = {case["id"]: case for case in scoring.load_cases()}
-    for case_id in ("remember-and-book", "multi-remember-search-schedule"):
-        fact = cases[case_id]["expect"]["state"]["facts_matches"][0]
-        assert {"user", "me", "self", "用户", "我"} <= set(fact["subject_one_of"])
+    direct = cases["remember-and-book"]["expect"]["state"]["facts_matches"][0]
+    topical = cases["multi-remember-search-schedule"]["expect"]["state"][
+        "facts_matches"
+    ][0]
+
+    assert {"user", "me", "self", "用户", "我"} <= set(direct["subject_one_of"])
+    assert {"user", "preference", "用户", "我"} <= set(
+        topical["subject_contains_any"]
+    )
 
 
 def test_relative_time_case_has_a_fixed_clock_and_exact_event_state():
