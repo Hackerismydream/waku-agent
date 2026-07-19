@@ -395,6 +395,28 @@ def test_first_person_preferences_accept_user_or_topic_owned_fact_subjects():
     )
 
 
+def test_skill_drafts_accept_equivalent_user_and_checklist_labels():
+    cases = {case["id"]: case for case in scoring.load_cases()}
+    weekly = cases["skill-use-weekly-reset"]["expect"]["state"][
+        "outbox_matches"
+    ][0]
+    trip = cases["skill-use-trip-prep"]["expect"]
+
+    assert {"plan", "weekly reset", "checklist"} <= set(
+        weekly["body_contains_any"]
+    )
+    assert set(trip["calls"][1]["args_contains_any"]["to"]) == {
+        "me",
+        "you",
+        "self",
+    }
+    assert set(trip["state"]["outbox_matches"][0]["to_one_of"]) == {
+        "me",
+        "you",
+        "self",
+    }
+
+
 def test_relative_time_case_has_a_fixed_clock_and_exact_event_state():
     case = next(
         case for case in scoring.load_cases() if case["id"] == "schedule-relative-time"
