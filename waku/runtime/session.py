@@ -11,6 +11,8 @@ away. What persists lives in waku/memory. Working memory =
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime
 
 from waku.config import Settings
 
@@ -55,18 +57,18 @@ class Session:
     """Holds one conversation: the chat history plus the recipe for the
     system prompt. One Session per gateway connection."""
 
-    def __init__(self, settings: Settings, memory=None, session_id: str = "default"):
+    def __init__(self, settings: Settings, memory=None, session_id: str = "default",
+                 clock: Callable[[], datetime] | None = None):
         self.settings = settings
         self.memory = memory  # waku.memory.Memory (None until Phase-2 wiring)
         self.session_id = session_id
         self.history: list[dict] = []
+        self._clock = clock or (lambda: datetime.now().astimezone())
 
     def build_system(self, user_message: str, notify=None) -> str:
-        from datetime import datetime
-
         # The agent runs on your laptop, so it should know your laptop's clock.
         # Local time WITH the timezone name — enough to resolve "in 30 minutes".
-        now = datetime.now().astimezone()
+        now = self._clock()
         parts = [load_soul(self.settings),
                  f"\nRight now it is {now:%A, %Y-%m-%d %H:%M} ({now:%Z}, UTC{now:%z}).",
                  # the agent should know its own brain — "what model are you?"

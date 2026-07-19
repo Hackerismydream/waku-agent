@@ -15,6 +15,9 @@ from waku.tools.registry import Tool
 
 def make_tool(home: Path) -> Tool:
     def send_message(to: str, body: str) -> str:
+        to = (to or "").strip()
+        if not to or "\r" in to or "\n" in to:
+            return "Error: send_message recipient must be one non-empty line."
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         safe_to = "".join(c if c.isalnum() else "-" for c in to)[:40]
         path = home / "outbox" / f"{stamp}-{safe_to}.txt"

@@ -60,6 +60,8 @@ def _duckduckgo(query: str, max_results: int) -> list[tuple[str, str, str]]:
 
 def make_tool() -> Tool:
     def search_web(query: str, max_results: int = 5) -> str:
+        if isinstance(max_results, bool) or not isinstance(max_results, int) or max_results < 1:
+            return "Error: max_results must be a positive integer."
         key = os.getenv("TAVILY_API_KEY") or os.getenv("WAKU_SEARCH_API_KEY")
         try:
             results = _tavily(query, key, max_results) if key else _duckduckgo(query, max_results)
@@ -91,7 +93,11 @@ def make_tool() -> Tool:
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "the search query"},
-                "max_results": {"type": "integer", "description": "how many results (default 5)"},
+                "max_results": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "how many results (default 5)",
+                },
             },
             "required": ["query"],
         },

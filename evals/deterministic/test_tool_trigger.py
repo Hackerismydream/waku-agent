@@ -105,6 +105,20 @@ def test_iteration_guardrail_stops_runaway_loop(tmp_path):
     assert result.iterations == 3 and "iteration limit" in result.reply
 
 
+def test_search_rejects_non_positive_result_limits(monkeypatch):
+    from waku.tools import search
+
+    monkeypatch.setattr(
+        search,
+        "_duckduckgo",
+        lambda query, max_results: [("Result", "Snippet", "https://example.com")],
+    )
+    tool = search.make_tool()
+
+    assert tool.input_schema["properties"]["max_results"]["minimum"] == 1
+    assert tool.fn(query="test", max_results=0).startswith("Error:")
+
+
 # ---------- live tier: the actual model eval over the dataset
 
 
@@ -130,5 +144,6 @@ def test_dataset_case(case, tmp_path):
         result.tool_calls,
         state=snapshot_state(app),
         controller=[event for event in events if event["type"] == "gate"],
+        reply=result.reply,
     )
     assert passed, reason

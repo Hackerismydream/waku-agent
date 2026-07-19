@@ -22,6 +22,11 @@ SOUL_MAX = 8000
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 
 
+def valid_skill_name(value: object) -> bool:
+    """Return whether a fixture/tool value is a safe user-Skill directory slug."""
+    return isinstance(value, str) and _SLUG.fullmatch(value) is not None
+
+
 def make_manage_memory_tool(memory) -> Tool:
     facts = memory.facts
     episodes = memory.episodes
@@ -107,7 +112,7 @@ def make_update_soul_tool(settings) -> Tool:
 def make_create_skill_tool(settings, memory) -> Tool:
     def create_skill(name: str, description: str, body: str) -> str:
         name = (name or "").strip().lower().replace(" ", "-")
-        if not _SLUG.match(name):
+        if not valid_skill_name(name):
             return "Skill name must be a short slug like 'weekly-review' (lowercase, hyphens)."
         dest = settings.home / "skills" / name / "SKILL.md"
         # never silently overwrite an existing skill (built-in or user)

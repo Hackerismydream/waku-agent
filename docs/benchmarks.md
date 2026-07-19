@@ -13,7 +13,7 @@ dataset UI, or leaderboard. The fixed task suite answers three product questions
 
 - 24 `dev` tasks for Prompt, routing, and Skill iteration;
 - 16 `heldout` tasks that must not guide those changes;
-- seven product areas: simple Q&A, memory, scheduling, Skill workflows,
+- eight product areas: simple Q&A, memory, scheduling, messaging, Skill workflows,
   multi-tool tasks, safety, and recovery.
 
 The split is part of the contract. Moving a difficult task from `heldout` to `dev`
@@ -37,38 +37,63 @@ Each JSONL row has this shape:
   "category": "scheduling",
   "failure_category": "routing",
   "setup": {
+    "clock": "2026-08-05T10:00:00+08:00",
     "events": [{"title": "Lunch", "start": "2026-08-05T12:00"}],
     "restart": false
   },
-  "input": "Check my calendar, then schedule a walk",
+  "input": "Check my calendar, then schedule a 30-minute walk after lunch",
   "expect": {
     "tool_path": ["list_events", "create_event"],
     "path_mode": "exact",
     "calls": [
-      {"tool": "create_event", "args_contains": {"title": "walk"}}
+      {
+        "tool": "create_event",
+        "args_contains": {"title": "walk"},
+        "args_equals": {"start": "2026-08-05T13:00"}
+      }
     ],
-    "gate": "retrieve",
     "require_success": true,
-    "state": {"calendar_count": 2, "calendar_contains": ["walk"]}
+    "state": {
+      "calendar_count": 2,
+      "calendar_matches": [
+        {
+          "title_contains": "walk",
+          "start_equals": "2026-08-05T13:00",
+          "end_equals": "2026-08-05T13:30"
+        }
+      ]
+    }
   },
   "judge_criteria": "Reads before writing and reports only the local action."
 }
 ```
 
-`setup` may seed facts, calendar events, outbox drafts, user Skills, and prior
-exchanges. `restart: true` rebuilds Waku against the same SQLite home and reloads
-the session before the measured turn. Setup activity is not counted as model work.
+`setup` may seed facts, calendar events, outbox drafts, user Skills, prior exchanges,
+a fixed local clock, and frozen web-search results. `restart: true` rebuilds Waku
+against the same SQLite home and reloads the session before the measured turn.
+Setup activity is not counted as model work. Search fixtures replace only the
+`search_web` adapter inside that isolated case; production search is unchanged.
+Fixture Skill names must be safe slugs, search limits must be positive, and the
+runner always disables host experimental tools inside its temporary home.
 
 The deterministic scorer in [`waku/ops/scoring.py`](../waku/ops/scoring.py) checks:
 
 - exact or ordered tool paths;
-- call argument substrings and minimum call counts;
+- call argument substrings, exact values, and minimum call counts (ISO calendar
+  timestamps are compared at the minute precision the tool persists);
 - retrieval-gate decisions;
-- tool errors;
-- SQLite, calendar, outbox, SOUL.md, and user-Skill end state.
+- tool errors, including an empty web search;
+- structured calendar, fact, outbox, and user-Skill records, including exact,
+  contains, excludes, and one-of predicates, plus textual SOUL.md state;
+- mechanically checkable reply constraints such as required text and a maximum
+  character count.
 
-The Judge never decides those facts. It reads only the task, final reply, and the
-task-specific `judge_criteria`.
+The Judge never decides tool or local-state facts. Deterministic assertions remain
+the source of those verdicts. For semantic consistency, the Judge receives the
+task-specific criterion and trusted fixture/model context as system instructions,
+then the candidate task, reply, tool receipts, and local artifacts in a separate JSON
+data envelope. This both exposes the frozen evidence needed to judge the reply and
+keeps candidate-authored prompt injection out of the rubric.
 
 ## 3. Development and release commands
 

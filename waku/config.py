@@ -65,6 +65,11 @@ class Settings:
     apple_tools: bool = field(
         default_factory=lambda: os.getenv("WAKU_APPLE_TOOLS", "") in ("1", "true", "yes")
     )
+    # Local coding/delegation adapters. Eval sandboxes explicitly override this
+    # to False so a host opt-in can never leak powerful tools into a benchmark.
+    experimental_tools: bool = field(
+        default_factory=lambda: os.getenv("WAKU_EXPERIMENTAL", "") in ("1", "true", "yes")
+    )
 
     # --- Optional gateway
     telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))

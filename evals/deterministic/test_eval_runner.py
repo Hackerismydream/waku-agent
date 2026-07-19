@@ -85,6 +85,190 @@ def test_state_snapshot_captures_side_effects(tmp_path):
     assert state["outbox_count"] == 1 and "Mina" in state["outbox_text"]
 
 
+def test_state_snapshot_exposes_structured_outbox_and_skill_records(tmp_path):
+    app = make_waku(tmp_path / "home", client=ScriptedClient([]))
+    app.tools.execute(
+        "send_message",
+        {"to": "Alex", "body": "The project demo moved to Friday."},
+    )
+    app.tools.execute(
+        "create_skill",
+        {
+            "name": "daily-shutdown",
+            "description": "Use for daily shutdown",
+            "body": "Review tomorrow's calendar, then draft a three-item wrap-up.",
+        },
+    )
+
+    state = runner.snapshot_state(app)
+
+    assert state["outbox"] == [
+        {"to": "Alex", "body": "The project demo moved to Friday."}
+    ]
+    assert state["skill_records"] == [
+        {
+            "name": "daily-shutdown",
+            "description": "Use for daily shutdown",
+            "body": "Review tomorrow's calendar, then draft a three-item wrap-up.",
+        }
+    ]
+
+
+def test_judge_context_contains_trusted_fixtures_and_observed_artifacts():
+    case = {
+        "setup": {
+            "clock": "2026-07-19T12:00:00+08:00",
+            "search_results": [
+                {
+                    "query_contains": "Python 3.14",
+                    "results": [
+                        {
+                            "title": "Python status",
+                            "snippet": "Python 3.14 is in bugfix support.",
+                            "url": "https://peps.python.org/pep-0745/",
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+    spec = runner.parse_model_spec("openai:model-a")
+    trusted = json.loads(runner._judge_ground_truth(spec, "model-a", case))
+    evidence = runner._judge_evidence(
+        {
+            "tool_calls": [{"tool": "send_message", "args": {"to": "Mina"}}],
+            "state_after": {
+                "outbox": [{"to": "Mina", "body": "Python 3.14 is supported."}],
+                "calendar": [],
+                "facts": [],
+                "skill_records": [],
+            },
+        }
+    )
+
+    assert trusted["evaluated_assistant"] == {
+        "provider": "openai",
+        "model": "model-a",
+        "harness": "Waku",
+    }
+    assert trusted["frozen_search_results"][0]["results"][0]["url"].endswith(
+        "pep-0745/"
+    )
+    assert evidence["artifacts"]["outbox"][0]["body"].startswith("Python 3.14")
+
+
+def test_prepare_case_injects_a_fixed_clock_into_the_system_prompt(
+    tmp_path, monkeypatch
+):
+    from waku import app as app_module
+
+    monkeypatch.setattr(app_module, "get_client", lambda settings: ScriptedClient([]))
+    case = {
+        "id": "relative-time",
+        "setup": {"clock": "2026-08-05T10:00:00+08:00"},
+    }
+    settings = Settings(
+        home=tmp_path / "home",
+        api_key="offline",
+        apple_calendar=False,
+    )
+
+    app = runner.prepare_case(settings, case)
+    system = app.session.build_system("Schedule a break in 30 minutes")
+
+    assert "Wednesday, 2026-08-05 10:00" in system
+    assert "UTC+0800" in system
+
+
+def test_prepare_case_replaces_live_search_with_a_frozen_fixture(
+    tmp_path, monkeypatch
+):
+    from waku import app as app_module
+
+    monkeypatch.setattr(app_module, "get_client", lambda settings: ScriptedClient([]))
+    case = {
+        "id": "frozen-search",
+        "setup": {
+            "search_results": [
+                {
+                    "query_contains": "Python 3.14",
+                    "results": [
+                        {
+                            "title": "Python 3.14.0",
+                            "snippet": "Python 3.14.0 was released on 7 October 2025.",
+                            "url": "https://www.python.org/downloads/release/python-3140/",
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+    settings = Settings(
+        home=tmp_path / "home",
+        api_key="offline",
+        apple_calendar=False,
+    )
+
+    app = runner.prepare_case(settings, case)
+
+    output = app.tools.execute("search_web", {"query": "latest Python 3.14 status"})
+    assert "Python 3.14.0" in output
+    assert "https://www.python.org/downloads/release/python-3140/" in output
+    assert app.tools.execute("search_web", {"query": "unrelated"}).startswith("Error:")
+    assert app.tools.execute(
+        "search_web", {"query": "latest Python 3.14 status", "max_results": 0}
+    ).startswith("Error:")
+
+
+def test_prepare_case_never_inherits_experimental_host_tools(tmp_path, monkeypatch):
+    from waku import app as app_module
+
+    monkeypatch.setenv("WAKU_EXPERIMENTAL", "1")
+    monkeypatch.setattr(app_module, "get_client", lambda settings: ScriptedClient([]))
+    settings = Settings(
+        home=tmp_path / "home",
+        api_key="offline",
+        apple_calendar=False,
+    )
+
+    app = runner.prepare_case(settings, {"id": "isolated-eval"})
+
+    assert "delegate_task" not in app.tools._tools
+
+
+def test_setup_skill_cannot_escape_the_eval_home(tmp_path):
+    home = tmp_path / "home"
+    outside = tmp_path / "escaped" / "SKILL.md"
+
+    with pytest.raises(ValueError, match="skill name"):
+        runner._write_setup_skills(
+            home,
+            {
+                "skills": [
+                    {
+                        "name": "../../escaped",
+                        "description": "malicious fixture",
+                        "body": "escape the sandbox",
+                    }
+                ]
+            },
+        )
+
+    assert not outside.exists()
+
+
+def test_send_message_rejects_recipient_header_injection(tmp_path):
+    app = make_waku(tmp_path / "home", client=ScriptedClient([]))
+
+    output = app.tools.execute(
+        "send_message",
+        {"to": "Alex\n\nThe demo moved to Friday", "body": "Friday"},
+    )
+
+    assert output.startswith("Error:")
+    assert runner.snapshot_state(app)["outbox_count"] == 0
+
+
 def test_recovery_fixture_rebuilds_waku_and_restores_session(tmp_path, monkeypatch):
     from waku import app as app_module
 

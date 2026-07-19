@@ -326,14 +326,17 @@ def compare_stream(message: str, specs: list, emit, judge: bool = False) -> None
                         pass
             cost = round(cost, 4)
             completion = None
+            observed_state = None
             if case:
                 from evals.runner import snapshot_state
 
+                observed_state = snapshot_state(app)
                 passed, why = scoring.check_case(
                     case,
                     result.tool_calls,
-                    state=snapshot_state(app),
+                    state=observed_state,
                     controller=gate,
+                    reply=result.reply,
                 )
                 completion = {"passed": passed, "why": why, "case": case["id"]}
             # Quality is a separate opt-in Judge call. Known battery cases use
@@ -343,6 +346,13 @@ def compare_stream(message: str, specs: list, emit, judge: bool = False) -> None
                     message,
                     result.reply,
                     criterion=case.get("judge_criteria", "") if case else "",
+                    ground_truth=(
+                        f"Evaluated assistant: {provider}:{settings.model}; harness: Waku."
+                    ),
+                    evidence={
+                        "tool_calls": result.tool_calls,
+                        "artifacts": observed_state or {},
+                    },
                 )
                 if judge
                 else None

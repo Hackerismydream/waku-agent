@@ -4,7 +4,6 @@ Apple ecosystem (WAKU_APPLE_TOOLS=1) and MCP servers (.waku/mcp.json)."""
 
 from __future__ import annotations
 
-import os
 import sqlite3
 
 from waku.config import Settings
@@ -32,7 +31,7 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) ->
     # Experimental tools — off by default; opt in with WAKU_EXPERIMENTAL=1.
     # delegate_task (sub-agents via pi) is live; terminal/browser/cron are
     # still skeletons that report "coming soon".
-    if os.getenv("WAKU_EXPERIMENTAL", "") in ("1", "true", "yes"):
+    if settings.experimental_tools:
         from waku.tools import experimental
 
         for t in experimental.make_tools(settings):

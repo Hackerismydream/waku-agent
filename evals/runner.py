@@ -191,6 +191,25 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _outbox_record(path: Path) -> dict:
+    header, _, body = path.read_text(errors="replace").partition("\n\n")
+    recipient = header.removeprefix("To:").strip()
+    return {"to": recipient, "body": body.strip()}
+
+
+def _skill_record(path: Path) -> dict | None:
+    from waku.memory.procedural.loader import _parse
+
+    skill = _parse(path)
+    if skill is None:
+        return None
+    return {
+        "name": skill.name,
+        "description": skill.description,
+        "body": skill.body,
+    }
+
+
 def snapshot_state(app) -> dict:
     """Take the checkable end-state of one isolated Waku sandbox."""
     calendar = [
@@ -213,6 +232,8 @@ def snapshot_state(app) -> dict:
     ]
     outbox_files = sorted((app.settings.home / "outbox").glob("*.txt"))
     skills = sorted((app.settings.home / "skills").rglob("SKILL.md"))
+    outbox = [_outbox_record(path) for path in outbox_files]
+    skill_records = [record for path in skills if (record := _skill_record(path)) is not None]
     soul_path = app.settings.home / "SOUL.md"
     outbox_text = "\n".join(path.read_text(errors="replace") for path in outbox_files)
     skills_text = "\n".join(path.read_text(errors="replace") for path in skills)
@@ -226,10 +247,12 @@ def snapshot_state(app) -> dict:
         "facts": facts,
         "outbox_count": len(outbox_files),
         "outbox_text": outbox_text,
+        "outbox": outbox,
         "outbox_files": [path.name for path in outbox_files],
         "skills_count": len(skills),
         "skills_text": skills_text,
         "skills": [str(path.relative_to(app.settings.home)) for path in skills],
+        "skill_records": skill_records,
         "soul_text": soul_text,
         "chat_count": len(chat),
         "chat_text": json.dumps(chat, ensure_ascii=False),
@@ -238,8 +261,18 @@ def snapshot_state(app) -> dict:
 
 
 def _write_setup_skills(home: Path, setup: dict) -> None:
+    from waku.tools.memory_admin import valid_skill_name
+
+    skills_root = (home / "skills").resolve()
     for skill in setup.get("skills", []):
-        destination = home / "skills" / skill["name"] / "SKILL.md"
+        name = skill.get("name") if isinstance(skill, dict) else None
+        if not valid_skill_name(name):
+            raise ValueError(f"invalid eval setup skill name {name!r}")
+        destination = (skills_root / name / "SKILL.md").resolve()
+        try:
+            destination.relative_to(skills_root)
+        except ValueError as exc:
+            raise ValueError(f"eval setup skill name escapes sandbox: {name!r}") from exc
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(
             "---\n"
@@ -250,13 +283,52 @@ def _write_setup_skills(home: Path, setup: dict) -> None:
         )
 
 
+def _install_search_fixture(app, setup: dict) -> None:
+    fixtures = setup.get("search_results", [])
+    if not fixtures:
+        return
+
+    from waku.tools import search
+
+    tool = search.make_tool()
+
+    def frozen_search(query: str, max_results: int = 5) -> str:
+        if isinstance(max_results, bool) or not isinstance(max_results, int) or max_results < 1:
+            return "Error: max_results must be a positive integer."
+        fixture = next(
+            (
+                row
+                for row in fixtures
+                if row["query_contains"].casefold() in query.casefold()
+            ),
+            None,
+        )
+        if fixture is None:
+            return f"Error: no frozen eval search result matches query {query!r}."
+        lines = [f"Frozen web results for '{query}' (eval fixture):"]
+        for index, result in enumerate(fixture["results"][:max_results], 1):
+            lines.append(
+                f"{index}. {result['title']}\n   {result['snippet']}\n   {result['url']}"
+            )
+        return "\n".join(lines)
+
+    tool.fn = frozen_search
+    app.tools.register(tool)
+
+
 def prepare_case(settings, case: dict):
     from waku.app import Waku
 
     setup = case.get("setup", {})
+    # A benchmark case is data, never authorization to inherit host-level
+    # delegation/terminal adapters from WAKU_EXPERIMENTAL.
+    settings.experimental_tools = False
+    fixed_now = datetime.fromisoformat(setup["clock"]) if setup.get("clock") else None
+    clock = (lambda: fixed_now) if fixed_now is not None else None
     settings.ensure_home()
     _write_setup_skills(settings.home, setup)
-    app = Waku(settings=settings)
+    app = Waku(settings=settings, clock=clock)
+    _install_search_fixture(app, setup)
 
     for fact in setup.get("facts", []):
         app.memory.facts.add(fact["subject"], fact["content"], source="eval_setup")
@@ -279,7 +351,8 @@ def prepare_case(settings, case: dict):
     if setup.get("restart"):
         app.close()
         app.conn.close()
-        app = Waku(settings=settings)
+        app = Waku(settings=settings, clock=clock)
+        _install_search_fixture(app, setup)
         app.session.switch(session_id)
     return app
 
@@ -327,6 +400,38 @@ def _usage_and_cost(home: Path) -> tuple[dict, dict, list[dict]]:
         {"estimated_usd": round(estimated, 6), "rates": unique_rates},
         rows,
     )
+
+
+def _judge_ground_truth(spec: ModelSpec, model: str, case: dict) -> str:
+    setup = case.get("setup", {})
+    verified = {
+        "evaluated_assistant": {
+            "provider": spec.provider,
+            "model": model,
+            "harness": "Waku",
+        },
+        "fixed_clock": setup.get("clock"),
+        "seeded_facts": setup.get("facts", []),
+        "seeded_events": setup.get("events", []),
+        "seeded_outbox": setup.get("outbox", []),
+        "seeded_skills": setup.get("skills", []),
+        "frozen_search_results": setup.get("search_results", []),
+    }
+    return json.dumps(verified, ensure_ascii=False)
+
+
+def _judge_evidence(receipt: dict) -> dict:
+    state = receipt.get("state_after", {})
+    return {
+        "tool_calls": receipt.get("tool_calls", []),
+        "artifacts": {
+            "calendar": state.get("calendar", []),
+            "facts": state.get("facts", []),
+            "outbox": state.get("outbox", []),
+            "skills": state.get("skill_records", []),
+            "soul": state.get("soul_text", "")[:4000],
+        },
+    }
 
 
 def _base_receipt(spec: ModelSpec, case: dict, trial: int, context: dict) -> dict:
@@ -378,6 +483,7 @@ def execute_trial(spec: ModelSpec, case: dict, trial: int, context: dict) -> dic
             home=home,
             apple_calendar=False,
             apple_tools=False,
+            experimental_tools=False,
         )
         wall_started = time.perf_counter()
         measured_started = None
@@ -392,12 +498,13 @@ def execute_trial(spec: ModelSpec, case: dict, trial: int, context: dict) -> dic
             }
             receipt["environment"] = {
                 "search_backend": (
-                    "tavily"
+                    "fixture"
+                    if case.get("setup", {}).get("search_results")
+                    else "tavily"
                     if os.getenv("TAVILY_API_KEY") or os.getenv("WAKU_SEARCH_API_KEY")
                     else "duckduckgo"
                 ),
-                "experimental_tools": os.getenv("WAKU_EXPERIMENTAL", "").lower()
-                in {"1", "true", "yes"},
+                "experimental_tools": settings.experimental_tools,
                 "semantic_store": settings.semantic_store,
                 "small_model": settings.small_model,
                 "max_iterations": settings.max_iterations,
@@ -434,6 +541,7 @@ def execute_trial(spec: ModelSpec, case: dict, trial: int, context: dict) -> dic
                 result.tool_calls,
                 state=receipt["state_after"],
                 controller=receipt["controller_decisions"],
+                reply=result.reply,
             )
             receipt["verdict"]["deterministic"] = "pass" if passed else "fail"
 
@@ -456,6 +564,8 @@ def execute_trial(spec: ModelSpec, case: dict, trial: int, context: dict) -> dic
                         judge_spec.provider,
                         allow_generic=context.get("allow_generic_api_key", True),
                     ),
+                    ground_truth=_judge_ground_truth(spec, settings.model, case),
+                    evidence=_judge_evidence(receipt),
                 )
                 if judged is not None:
                     from waku.ops.dashboard import price_for

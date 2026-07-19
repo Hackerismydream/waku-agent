@@ -18,9 +18,9 @@ from waku.tools import build_registry
 
 
 class Waku:
-    def __init__(self, settings: Settings | None = None, client=None, conn=None):
-        # `client` and `conn` are injectable: evals swap in a scripted model,
-        # the dashboard injects a cross-thread connection. Same seam either way.
+    def __init__(self, settings: Settings | None = None, client=None, conn=None, clock=None):
+        # `client`, `conn`, and `clock` are injectable: evals swap in a scripted
+        # model and fixed time; the dashboard injects a cross-thread connection.
         self.settings = settings or load_settings()
         self.settings.ensure_home()
         self.conn = conn or connect(self.settings.home)
@@ -32,7 +32,7 @@ class Waku:
         self.memory = Memory(self.conn, self.settings, self.client)
         self.tools = build_registry(self.conn, self.settings, self.memory)
         self.mcp_bridge = getattr(self.tools, "mcp_bridge", None)
-        self.session = Session(self.settings, memory=self.memory)
+        self.session = Session(self.settings, memory=self.memory, clock=clock)
         self.tracer = Tracer(self.settings)
 
     def close(self) -> None:
