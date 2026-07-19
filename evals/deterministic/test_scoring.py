@@ -6,6 +6,11 @@ contract: the checklist logic, and matching a free-text prompt to its case."""
 
 from __future__ import annotations
 
+from collections import Counter
+
+import pytest
+
+from evals.helpers import ScriptedClient, make_waku
 from waku.ops import scoring
 
 
@@ -49,6 +54,72 @@ def test_case_for_message_matches_trimmed_input():
 
 def test_real_dataset_loads_and_every_case_is_scoreable():
     cases = scoring.load_cases()
-    assert len(cases) >= 11
-    for c in cases:                       # every seeded case must have the fields the scorer reads
-        assert "id" in c and "input" in c and "expect_tool" in c
+    scoring.validate_suite(cases)
+    assert len(cases) == 40
+    assert Counter(c["split"] for c in cases) == {"dev": 24, "heldout": 16}
+    assert {c["category"] for c in cases} == {
+        "simple_qa", "memory", "scheduling", "skill", "multi_tool", "safety", "recovery",
+    }
+    for case in cases:
+        assert case["failure_category"] in scoring.FAILURE_CATEGORIES
+        assert case["judge_criteria"].strip()
+        assert "tool_path" in case["expect"]
+
+
+def test_structured_contract_checks_path_args_gate_and_state():
+    case = {
+        "expect": {
+            "tool_path": ["list_events", "create_event"],
+            "path_mode": "exact",
+            "calls": [
+                {"tool": "create_event", "args_contains": {"title": "walk"}},
+            ],
+            "gate": "retrieve",
+            "state": {"calendar_count": 1, "calendar_contains": ["walk"]},
+        },
+    }
+    calls = [
+        {"tool": "list_events", "args": {}, "output": "No events found."},
+        {
+            "tool": "create_event",
+            "args": {"title": "Short walk"},
+            "output": "Event created.",
+        },
+    ]
+    state = {"calendar_count": 1, "calendar_text": "Short walk"}
+
+    assert scoring.check_case(case, calls, state=state, controller={"decision": "retrieve"}) == (
+        True,
+        "ok",
+    )
+
+    ok, why = scoring.check_case(case, calls, state=state, controller={"decision": "skip"})
+    assert not ok and "gate" in why
+
+
+def test_failure_classification_separates_argument_and_response_failures():
+    case = {"failure_category": "routing"}
+    assert scoring.classify_failure(case, "'alex' not in args[title]") == "tool_args"
+    assert scoring.classify_failure(case, "expected create_event, called nothing") == "routing"
+    assert scoring.classify_failure(case, "judge score 4 below 7", judge_failed=True) == "response"
+
+
+def test_real_dataset_only_names_registered_default_tools(tmp_path):
+    app = make_waku(tmp_path / "home", client=ScriptedClient([]))
+    available = {schema["name"] for schema in app.tools.schemas()}
+
+    referenced = {
+        tool
+        for case in scoring.load_cases()
+        for tool in case["expect"]["tool_path"]
+    }
+
+    assert referenced <= available
+
+
+def test_suite_validation_rejects_a_malformed_state_contract():
+    cases = scoring.load_cases()
+    cases[0]["expect"]["state"] = []
+
+    with pytest.raises(ValueError, match="expect.state must be an object"):
+        scoring.validate_suite(cases)

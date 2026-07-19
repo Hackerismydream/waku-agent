@@ -298,32 +298,55 @@ def compare_stream(message: str, specs: list, emit, judge: bool = False) -> None
         try:
             settings = Settings(provider=provider, model=model, small_model="",
                                 home=home, apple_calendar=False)
-            app = Waku(settings=settings)
-            # A scored case may pre-load a fact (e.g. "applies memory") so every
-            # model starts from the same state the checklist assumes.
-            if case and case.get("setup_fact"):
-                app.memory.facts.add(case["setup_fact"]["subject"], case["setup_fact"]["content"])
+            if case:
+                # The fixed battery owns its sandbox setup (facts, events,
+                # skills, and restart fixtures). Free-form races stay a plain
+                # fresh Waku. This import only exists in repository eval runs.
+                from evals.runner import prepare_case
+
+                app = prepare_case(settings, case)
+            else:
+                app = Waku(settings=settings)
             t0 = time.perf_counter()
             result = app.respond(message, source="compare", observer=obs)
             ms = int((time.perf_counter() - t0) * 1000)
             tin = tout = 0
+            cost = 0.0
             ledger = home / "usage.jsonl"
             if ledger.exists():
                 for line in ledger.read_text().splitlines():
                     try:
                         r = json.loads(line)
                         tin, tout = tin + r.get("in", 0), tout + r.get("out", 0)
+                        pin, pout = price_for(
+                            r.get("provider", provider), r.get("model", settings.model)
+                        )
+                        cost += r.get("in", 0) / 1e6 * pin + r.get("out", 0) / 1e6 * pout
                     except json.JSONDecodeError:
                         pass
-            pin, pout = price_for(provider, settings.model)
-            cost = round(tin / 1e6 * pin + tout / 1e6 * pout, 4)
+            cost = round(cost, 4)
             completion = None
             if case:
-                passed, why = scoring.check_case(case, result.tool_calls)
+                from evals.runner import snapshot_state
+
+                passed, why = scoring.check_case(
+                    case,
+                    result.tool_calls,
+                    state=snapshot_state(app),
+                    controller=gate,
+                )
                 completion = {"passed": passed, "why": why, "case": case["id"]}
-            # Quality: K3 grades the reply 0-10 when judging is on (own API call,
-            # so it's opt-in per race). A judge hiccup returns None, never fails.
-            quality = judge_mod.judge_reply(message, result.reply) if judge else None
+            # Quality is a separate opt-in Judge call. Known battery cases use
+            # the same task-specific criterion as the artifact runner.
+            quality = (
+                judge_mod.judge_reply(
+                    message,
+                    result.reply,
+                    criterion=case.get("judge_criteria", "") if case else "",
+                )
+                if judge
+                else None
+            )
             send("result", {"spec": spec, "provider": provider, "model": settings.model,
                             "reply": result.reply, "gate": (gate or None),
                             "iterations": result.iterations, "latency_ms": ms,

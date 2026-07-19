@@ -74,8 +74,9 @@ class Tracer:
         the dashboard. Tokens are the ground truth; dollar cost is derived from
         them (pricing can change), so we store tokens + provider/model."""
         usage = event.get("usage", {})
-        record = {"ts": _now(), "provider": self.settings.provider,
-                  "model": self.settings.model or "", "kind": "loop",
+        record = {"ts": _now(), "provider": event.get("provider", self.settings.provider),
+                  "model": event.get("model", self.settings.model or ""),
+                  "kind": event.get("stage", "loop"),
                   "in": usage.get("in", 0), "out": usage.get("out", 0)}
         with (self.settings.home / "usage.jsonl").open("a") as f:
             f.write(json.dumps(record) + "\n")

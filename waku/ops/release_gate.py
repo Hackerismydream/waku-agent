@@ -5,7 +5,8 @@ Changed the prompt? Swapped the model? Tuned retrieval top-k? Run the gate:
     python -m waku.ops.release_gate     (or: make gate)
 
 Deterministic evals must pass 100% — they are unit tests; one failure blocks.
-Judge evals run when a key is present and report scores. Exit code 0 = ship.
+Judge evals run when a key is present. Without a key the local gate is only
+conditional: useful for development, but not a full semantic release verdict.
 """
 
 from __future__ import annotations
@@ -21,6 +22,15 @@ from dotenv import load_dotenv
 load_dotenv()  # the key check below must see .env, same as the app does
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+def gate_status(deterministic: str, judge: str) -> str:
+    """Return the honest three-state release verdict."""
+    if deterministic != "pass" or judge in {"fail", "not run"}:
+        return "closed"
+    if judge == "pass":
+        return "open"
+    return "conditional"
 
 
 def run(suite: str) -> tuple[int, dict]:
@@ -50,6 +60,7 @@ def report(deterministic: str, judge: str, suites: dict | None = None) -> None:
     record = {
         "deterministic": deterministic,
         "judge": judge,
+        "release": gate_status(deterministic, judge),
         "suites": suites or {},
         "ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
@@ -83,6 +94,8 @@ def main() -> None:
     else:
         report("pass", "skipped", suites)
         print(f"\n(judge suite skipped: no API key for provider '{settings.provider}')")
+        print("\nGATE CONDITIONAL — deterministic passed; semantic Judge was not evaluated.")
+        return
 
     print("\nGATE OPEN — safe to release.")
 

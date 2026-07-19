@@ -1,4 +1,4 @@
-"""K3-as-referee quality scoring for the Compare arena.
+"""Opt-in final-reply quality scoring for Waku evals and Compare.
 
 Completion (waku.ops.scoring) is deterministic — did the right tool fire. Quality
 is the other half: *how good was the answer*, for the open-ended part a checklist
@@ -6,11 +6,9 @@ can't see. There's no single right answer, so we do what the market does for tha
 axis (MT-Bench / Chatbot-Arena style): an LLM grades the transcript against a
 rubric, 0-10 + a one-line reason.
 
-The referee is **kimi-k3** by default — for the sponsor video the hook is that
-K3 grades the whole field, itself included, out loud. That's a bias we surface,
-not hide: for unbiased internal numbers, point WAKU_JUDGE_* at a model that isn't
-racing. The judge speaks the anthropic wire (kimi's endpoint is anthropic-compat),
-so it reuses Waku's own client — no extra dependency.
+The legacy interactive default is configurable with WAKU_JUDGE_PROVIDER and
+WAKU_JUDGE_MODEL. Frozen baselines must instead pass an explicit Judge that is
+not one of the evaluated models.
 """
 
 from __future__ import annotations
@@ -33,6 +31,9 @@ The user asked:
 The assistant replied:
 {reply}
 
+Task-specific success criterion:
+{criterion}
+
 Score how well the reply serves the user's request on a 0-10 scale:
 - 9-10: fully addresses the request, correct, concise, honest about any limits.
 - 5-8: mostly addresses it, minor gaps, padding, or small errors.
@@ -44,7 +45,8 @@ Reply with ONLY a JSON object, no prose:
 
 
 def judge_reply(task: str, reply: str, provider: str | None = None,
-                model: str | None = None) -> dict | None:
+                model: str | None = None, criterion: str = "",
+                api_key: str | None = None) -> dict | None:
     """Grade one reply. Returns {"score": 0-10, "reason": str, "judge": model} or
     None if there's nothing to grade or the judge is unreachable (a judge hiccup
     must never fail a race)."""
@@ -52,13 +54,24 @@ def judge_reply(task: str, reply: str, provider: str | None = None,
         return None
     provider = provider or JUDGE_PROVIDER
     model = model or JUDGE_MODEL
-    prompt = _RUBRIC.format(task=task[:2000], reply=reply[:4000])
+    if api_key is None:
+        from waku.loop.models import PROVIDERS
+
+        provider_config = PROVIDERS.get(provider)
+        api_key = (
+            os.getenv(provider_config.key_env, "") if provider_config else ""
+        ) or os.getenv("WAKU_API_KEY", "")
+    prompt = _RUBRIC.format(
+        task=task[:2000],
+        reply=reply[:4000],
+        criterion=(criterion or "No additional task-specific criterion.")[:1000],
+    )
     # Races judge every column at once, so the judge endpoint sees a burst of
     # concurrent calls and may 429. One retry turns most of those transient
     # failures into a score; a persistent failure still degrades to None.
     for attempt in range(2):
         try:
-            settings = Settings(provider=provider, model=model, small_model="",
+            settings = Settings(provider=provider, api_key=api_key, model=model, small_model="",
                                 home=load_settings().home, apple_calendar=False)
             client = get_client(settings)   # fills the provider default id
             resp = client.messages.create(
@@ -67,8 +80,11 @@ def judge_reply(task: str, reply: str, provider: str | None = None,
             text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
             obj = json.loads(text[text.index("{"): text.rindex("}") + 1])
             score = max(0, min(10, int(obj["score"])))
+            usage = getattr(resp, "usage", None)
             return {"score": score, "reason": str(obj.get("reason", ""))[:200],
-                    "judge": settings.model}
+                    "judge": settings.model, "provider": provider,
+                    "tokens": {"input": getattr(usage, "input_tokens", 0),
+                               "output": getattr(usage, "output_tokens", 0)}}
         except Exception:
             if attempt == 0:
                 time.sleep(1.5)   # brief backoff, then one more try

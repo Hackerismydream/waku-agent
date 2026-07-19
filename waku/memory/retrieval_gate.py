@@ -34,7 +34,7 @@ User message: {message}"""
 
 
 def should_retrieve(
-    client: anthropic.Anthropic, small_model: str, message: str
+    client: anthropic.Anthropic, small_model: str, message: str, notify=None
 ) -> tuple[bool, str, str]:
     """Returns (retrieve?, search_query, reason). Fails open: if the gate
     itself errors, we retrieve — a stale memory beats a lost one."""
@@ -46,6 +46,20 @@ def should_retrieve(
             max_tokens=600,
             messages=[{"role": "user", "content": GATE_PROMPT.format(message=message)}],
         )
+        if notify:
+            notify(
+                "llm",
+                {
+                    "stage": "retrieval_gate",
+                    "model": small_model,
+                    "iteration": 0,
+                    "stop_reason": response.stop_reason,
+                    "usage": {
+                        "in": response.usage.input_tokens,
+                        "out": response.usage.output_tokens,
+                    },
+                },
+            )
         text = "".join(b.text for b in response.content if b.type == "text")
         if "{" not in text:   # a reasoning-only / truncated reply, not an error
             return True, message, "gate returned no JSON — failing open"

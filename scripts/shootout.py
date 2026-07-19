@@ -10,9 +10,9 @@ the right arguments — 0 or 1, no judge involved. Alongside correctness it
 collects what benchmarks usually hide: tokens, estimated dollars (per-model
 pricing, same table the dashboard uses), latency, and loop iterations.
 
-Output: a markdown table on stdout plus a timestamped .md + .json report in
-.waku/shootout/ — publish it, and anyone can re-run it with their own keys.
-That's the point: don't trust the table, reproduce it.
+Output: a complete run directory under .waku/evals/ (manifest, every trial,
+failures, summary, and regression ledger). Publish a redacted artifact or rerun
+it with your own keys; never trust a summary without its receipts.
 
 Honesty notes baked in: cost is an ESTIMATE from tokens x list price (cache
 discounts not modeled); pass-rate is deterministic tool-behavior, not vibes —
@@ -26,84 +26,65 @@ import argparse
 import json
 import sys
 import tempfile
-import time
 from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from waku.config import Settings, load_settings  # noqa: E402  (loads .env keys)
-from waku.ops.dashboard import price_for  # noqa: E402
-from waku.ops.scoring import check_case, load_cases  # noqa: E402  (the ONE scorer)
+from waku.config import load_settings  # noqa: E402  (loads .env keys)
+from waku.ops.scoring import check_case as check_case, load_cases  # noqa: E402  (re-export)
 
 DATASET = load_cases()
 
 
-def _ledger_totals(home: Path) -> tuple[int, int]:
-    total_in = total_out = 0
-    path = home / "usage.jsonl"
-    if path.exists():
-        for line in path.read_text().splitlines():
-            try:
-                r = json.loads(line)
-                total_in, total_out = total_in + r.get("in", 0), total_out + r.get("out", 0)
-            except json.JSONDecodeError:
-                pass
-    return total_in, total_out
-
-
 def run_one(provider: str, model: str, cases: list[dict], trials: int = 1) -> dict:
-    """One contestant: real loop, every case, `trials` attempts each.
+    """Compatibility summary over the canonical receipt-producing runner."""
+    from evals.runner import preflight_credentials, run_matrix
 
-    Model tool-calling is nondeterministic — a case can pass on one run and
-    fail the next (we watched kimi-k3 do exactly that). One trial is a coin
-    flip; N trials per case turns the table into a pass RATE. Each trial gets
-    a fresh home so no memory leaks between attempts."""
-    from waku.app import Waku
+    spec = f"{provider}:{model}" if model else provider
+    preflight_credentials([spec])
+    with tempfile.TemporaryDirectory(prefix="waku-shootout-summary-") as temp:
+        run_dir, _ = run_matrix(
+            [spec], cases, trials=trials, output_root=Path(temp)
+        )
+        receipts = [
+            json.loads(line) for line in (run_dir / "results.jsonl").read_text().splitlines()
+        ]
 
-    rows, t_run, resolved_model = [], time.perf_counter(), model
+    rows = []
     for case in cases:
-        hits, lat, iters_seen, tin, tout, cost, why = 0, [], [], 0, 0, 0.0, "ok"
-        for _ in range(trials):
-            home = Path(tempfile.mkdtemp(prefix=f"shootout-{provider}-"))
-            settings = Settings(provider=provider, model=model, small_model="",
-                                home=home, apple_calendar=False)
-            app = Waku(settings=settings)
-            resolved_model = settings.model   # get_client filled the default
-            if "setup_fact" in case:
-                app.memory.facts.add(case["setup_fact"]["subject"], case["setup_fact"]["content"])
-            t0 = time.perf_counter()
-            try:
-                result = app.respond(case["input"])
-                ok, w = check_case(case, result.tool_calls)
-                iters_seen.append(result.iterations)
-            except Exception as exc:  # a crashed turn is a failed trial, not a crashed shootout
-                ok, w = False, f"error: {str(exc)[:90]}"
-            lat.append(time.perf_counter() - t0)
-            i1, o1 = _ledger_totals(home)
-            pin, pout = price_for(provider, model or settings.model)
-            tin, tout = tin + i1, tout + o1
-            cost += i1 / 1e6 * pin + o1 / 1e6 * pout
-            hits += ok
-            if not ok:
-                why = w
-        rows.append({"case": case["id"], "hits": hits, "trials": trials,
-                     "passed": hits == trials, "why": "ok" if hits == trials else why,
-                     "avg_latency_s": round(sum(lat) / len(lat), 1),
-                     "iterations": max(iters_seen or [0]),
-                     "tokens_in": tin, "tokens_out": tout, "cost_usd": round(cost, 4)})
-        r = rows[-1]
-        print(f"  [{hits}/{trials}] {case['id']:26s} {r['avg_latency_s']:5.1f}s avg  "
-              f"${cost:.4f}  {'' if r['passed'] else why}")
+        attempts = [receipt for receipt in receipts if receipt["case_id"] == case["id"]]
+        hits = sum(row["verdict"]["deterministic"] == "pass" for row in attempts)
+        failures = [row["failure"]["reason"] for row in attempts if row.get("failure")]
+        rows.append({
+            "case": case["id"],
+            "hits": hits,
+            "trials": trials,
+            "passed": hits == trials,
+            "why": failures[-1] if failures else "ok",
+            "avg_latency_s": round(
+                sum(row["latency_ms"] for row in attempts) / max(len(attempts), 1) / 1000, 1
+            ),
+            "iterations": max(
+                (event.get("iterations", 0) for row in attempts for event in row["trace"]
+                 if event.get("type") == "turn_end"),
+                default=0,
+            ),
+            "tokens_in": sum(row["tokens"]["input"] for row in attempts),
+            "tokens_out": sum(row["tokens"]["output"] for row in attempts),
+            "cost_usd": round(
+                sum(row["cost"]["estimated_usd"] for row in attempts), 4
+            ),
+        })
     n = max(len(rows), 1)
+    resolved_model = receipts[0]["model"]["model"] if receipts else model
     return {"provider": provider, "model": resolved_model,
             "trials": trials, "cases": rows,
             "hit_rate": round(sum(r["hits"] for r in rows) / (n * trials), 3),
             "passed": sum(r["hits"] for r in rows), "total": len(rows) * trials,
             "cost_usd": round(sum(r["cost_usd"] for r in rows), 4),
-            "avg_latency_s": round(sum(r["avg_latency_s"] for r in rows) / n, 1),
-            "wall_s": round(time.perf_counter() - t_run, 1)}
+            "avg_latency_s": round(sum(r["avg_latency_s"] for r in rows) / n, 1)}
 
 
 def markdown(results: list[dict]) -> str:
@@ -156,6 +137,14 @@ def main() -> None:
     parser.add_argument("--cases", default="", help="comma-separated case ids (default: all)")
     parser.add_argument("--trials", type=int, default=3,
                         help="attempts per case (default 3 — rates, not coin flips)")
+    parser.add_argument("--split", choices=("dev", "heldout", "all"), default="all",
+                        help="fixed dataset split (default all)")
+    parser.add_argument("--judge", default="",
+                        help="independent provider:model for final-reply quality")
+    parser.add_argument("--baseline", action="store_true",
+                        help="freeze the reviewed 3-model x 3-trial M1 baseline")
+    parser.add_argument("--output", type=Path,
+                        help="artifact root (default .waku/evals)")
     parser.add_argument("--coding", action="store_true",
                         help="run the CODING battery (evals/coding.jsonl) via pi per model, "
                              "scored by each task's verify command")
@@ -180,26 +169,60 @@ def main() -> None:
         print(f"\nreport: {out_dir}/coding-{stamp}.md")
         return
 
+    from evals.runner import (
+        baseline_freeze_ready,
+        preflight_credentials,
+        run_matrix,
+        validate_baseline_request,
+    )
+    from waku.ops.scoring import validate_suite
+
+    validate_suite(DATASET)
     wanted = [c.strip() for c in args.cases.split(",") if c.strip()]
-    cases = [c for c in DATASET if not wanted or c["id"] in wanted]
-    if not cases:
-        raise SystemExit(f"no cases match {wanted!r} — ids: {[c['id'] for c in DATASET]}")
+    cases = [
+        case for case in DATASET
+        if (args.split == "all" or case["split"] == args.split)
+        and (not wanted or case["id"] in wanted)
+    ]
+    missing = sorted(set(wanted) - {case["id"] for case in cases})
+    if missing or not cases:
+        raise SystemExit(
+            f"no complete case selection; missing ids: {missing} — "
+            f"available: {[case['id'] for case in DATASET]}"
+        )
+    if args.baseline:
+        try:
+            validate_baseline_request(
+                args.runs,
+                trials=args.trials,
+                split=args.split,
+                selected_case_ids=wanted,
+                judge=args.judge or None,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
 
-    results = []
-    for spec in args.runs:
-        provider, _, model = spec.partition(":")
-        print(f"\n=== {provider}:{model or '(default)'} — {len(cases)} cases x {args.trials} trials ===")
-        results.append(run_one(provider, model, cases, trials=args.trials))
+    try:
+        preflight_credentials(args.runs, args.judge or None)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
-    table = markdown(results)
-    print("\n" + table)
-
-    out_dir = load_settings().home / "shootout"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    (out_dir / f"shootout-{stamp}.json").write_text(json.dumps(results, indent=1))
-    (out_dir / f"shootout-{stamp}.md").write_text(table + "\n")
-    print(f"\nreport: {out_dir}/shootout-{stamp}.md (+ .json)")
+    out_root = args.output or load_settings().home / "evals"
+    try:
+        run_dir, summary = run_matrix(
+            args.runs,
+            cases,
+            trials=args.trials,
+            output_root=out_root,
+            judge=args.judge or None,
+            baseline=args.baseline,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print("\n" + (run_dir / "summary.md").read_text())
+    print(f"artifact: {run_dir}")
+    if summary["execution_errors"] or (args.baseline and not baseline_freeze_ready(summary)):
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

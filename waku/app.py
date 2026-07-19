@@ -6,6 +6,8 @@ session → loop. If you want to understand the repo in one place, start here.
 
 from __future__ import annotations
 
+import hashlib
+
 from waku.config import Settings, load_settings
 from waku.db import connect
 from waku.loop.agent import LoopResult, Observer, run_loop
@@ -59,6 +61,13 @@ class Waku:
 
         with self.tracer.turn(user_message):
             system = self.session.build_system(user_message, notify=notify)
+            # Record the exact prompt instance without leaking its contents.
+            # The stable prompt-source version lives in eval artifacts; this
+            # hash also captures per-run memory, Skill, clock, and model text.
+            notify(
+                "prompt",
+                {"sha256": hashlib.sha256(system.encode()).hexdigest(), "chars": len(system)},
+            )
             # Working memory is a bounded window: only the last N turns (2 rows
             # each) enter the prompt, so context/cost/latency stay flat no matter
             # how long the conversation runs. Older turns live in state.db and

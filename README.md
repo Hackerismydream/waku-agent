@@ -246,23 +246,33 @@ you > when am I meeting Alex?
 **2. Deterministic eval vs LLM-as-judge.** *"Did it create the right calendar event?"*
 is a unit test — 0 or 1, no model judges it (`make eval`). *"Was the reply helpful?"*
 is a judged score with a threshold (`make eval-judge`). Conflating the two is the most
-common eval mistake; here they're separate suites you can diff. `make gate` runs both
-as a release gate.
+common eval mistake; here they're separate suites you can diff. `make gate` runs the
+offline checks and runs the Judge when its key is available. Without that key it reports
+`GATE CONDITIONAL`, not a complete semantic release pass.
 
 ## Eval, tracing & catching bugs
 
-Three commands, two kinds of eval — the LLM-Ops half of the system:
+The internal suite and release commands are:
 
 ```bash
 make eval          # deterministic: "did the right tool fire?" — 0 or 1, no model judges it
+make eval-live     # explicit live pass over 40 fixed task contracts with the active provider
 make eval-judge    # LLM-as-judge: "was the reply helpful?" — a scored %, needs a key
-make gate          # the release gate: deterministic must pass 100%, judge must clear threshold
+make gate          # OPEN only when deterministic + Judge pass; otherwise CLOSED or CONDITIONAL
+make shootout RUNS="kimi:kimi-k3 anthropic:claude-opus-4-8"
+                   # repeated matrix + full receipts under .waku/evals/
 ```
 
 Deterministic tests are plain pytest in [`evals/deterministic/`](evals/deterministic); judged
 ones use DeepEval in [`evals/judge/`](evals/judge). Keeping them apart is the whole point —
 conflating "did it do the thing" (a unit test) with "was it any good" (a scored judgement) is
 the most common eval mistake.
+
+The 40 candidate tasks in [`evals/dataset.jsonl`](evals/dataset.jsonl) are fixed at
+24 development and 16 held-out cases. Each matrix attempt preserves the controller decision,
+tool path and arguments, sandbox state, final reply, token usage, latency, estimated cost,
+trace, and verdict. See [`docs/benchmarks.md`](docs/benchmarks.md) for the contract and the
+human-review requirement before a 3-model × 3-trial baseline can be frozen.
 
 **Where the results show:** the terminal, and the dashboard's **Ops** tab — the release-gate
 verdict, an **eval-history** table (one row per `make gate`, so you can see it grow), the actual
@@ -421,8 +431,11 @@ The `waku` command is installed with the package; the `make` targets are equival
 | `waku brief` | morning briefing from Calendar + Mail + memory |
 | `make trace` | deep trace waterfalls (Phoenix) at localhost:6006 |
 | `make eval` | deterministic evals (0/1, no judge) |
+| `make eval-live` | explicit live run of the 40 fixed task contracts |
 | `make eval-judge` | LLM-as-judge evals (scored %) |
-| `make gate` | the release gate — both eval suites must pass |
+| `make gate` | release gate — `OPEN`, `CLOSED`, or `CONDITIONAL` when Judge is skipped |
+| `make shootout RUNS="…"` | model matrix with complete receipts in `.waku/evals/` |
+| `make baseline RUNS="…" JUDGE="…"` | reviewed 40-task, 3-model × 3-trial frozen baseline |
 
 ## Roadmap — the whiteboard boxes beyond the flagship task
 

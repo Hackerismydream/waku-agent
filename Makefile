@@ -8,7 +8,7 @@
 # `source .venv/bin/activate` — both work, this is just fewer steps.
 PY := $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 
-.PHONY: run voice telegram brief dashboard trace eval eval-judge gate lint
+.PHONY: run voice telegram brief dashboard trace eval eval-live eval-judge gate shootout baseline lint
 
 run:            ## chat with Waku in the terminal
 	$(PY) -m waku
@@ -31,17 +31,23 @@ trace:          ## deep trace waterfalls (Phoenix) at http://localhost:6006
 eval:           ## deterministic evals (0/1, no judge involved)
 	$(PY) -m pytest -q evals/deterministic
 
+eval-live:      ## explicit live model run of the 40 task contracts
+	WAKU_LIVE_EVAL=1 $(PY) -m pytest -q evals/deterministic/test_tool_trigger.py
+
 eval-judge:     ## LLM-as-judge evals (scored %, needs an API key)
 	$(PY) -m pytest -q evals/judge
 
-gate:           ## the release gate: deterministic must pass, judge must clear threshold
+gate:           ## deterministic gate; conditional when the judge has no key
 	$(PY) -m waku.ops.release_gate
 
 shootout:       ## same tasks, different brains: make shootout RUNS="kimi:kimi-k3 anthropic:claude-opus-4-8"
 	$(PY) scripts/shootout.py $(RUNS)
 
+baseline:       ## reviewed 40 tasks, exactly 3 models x 3 trials, independent judge
+	$(PY) -m evals.runner $(RUNS) --baseline --judge $(JUDGE)
+
 shootout-coding: ## coding round via pi, scored by tests: make shootout-coding RUNS="kimi:kimi-k3 anthropic:claude-opus-4-8"
 	$(PY) scripts/shootout.py $(RUNS) --coding
 
 lint:
-	$(PY) -m ruff check waku evals
+	$(PY) -m ruff check waku evals scripts

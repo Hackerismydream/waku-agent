@@ -30,10 +30,10 @@ def tool_block(name: str, args: dict, call_id: str = "tu_1"):
     return SimpleNamespace(type="tool_use", id=call_id, name=name, input=args)
 
 
-def response(blocks, stop_reason="end_turn"):
+def response(blocks, stop_reason="end_turn", input_tokens=0, output_tokens=0):
     return SimpleNamespace(
         stop_reason=stop_reason,
-        usage=SimpleNamespace(input_tokens=0, output_tokens=0),
+        usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens),
         content=blocks,
     )
 

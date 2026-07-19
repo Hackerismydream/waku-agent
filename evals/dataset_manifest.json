@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "status": "pending_author_review",
+  "reviewed_by": null,
+  "reviewed_at": null,
+  "dataset_sha256": null,
+  "task_count": 40,
+  "splits": {
+    "dev": 24,
+    "heldout": 16
+  },
+  "note": "Candidate M1 task suite. Approve only after a human reviews every task contract, then record reviewer, timestamp, and the reviewed dataset SHA-256."
+}

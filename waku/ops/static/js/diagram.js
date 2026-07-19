@@ -86,7 +86,7 @@ function archSVG(d){
     ${flow("M878 142 L878 156")}
     ${box(752,156,250,50,"评测","确定性测试 + 模型裁判","ops")}
     ${flow("M878 206 L878 220")}
-    ${box(752,220,250,50,"发布门",d.eval_report?"确定性 "+evalStatus(d.eval_report.deterministic)+" · 裁判 "+evalStatus(d.eval_report.judge):"运行 make gate","ops")}
+    ${box(752,220,250,50,"发布门",d.eval_report?evalStatus(releaseStatus(d.eval_report))+" · 确定性 "+evalStatus(d.eval_report.deterministic)+" · 裁判 "+evalStatus(d.eval_report.judge):"运行 make gate","ops")}
     ${flow("M878 270 L878 284")}
     ${box(752,284,250,50,"发布","新提示词 · 模型 · 配置","ops")}
     <!-- feedback: Release improves the Harness — a short arrow across the gap,

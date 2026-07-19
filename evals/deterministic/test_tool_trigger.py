@@ -7,24 +7,30 @@ teams skip and shouldn't.
 
 Two tiers:
   offline  — scripted model, always runs, tests OUR code (loop, tools, wiring)
-  live     — real model, runs when the active provider has a key, tests the
-             MODEL+PROMPT behavior on evals/dataset.jsonl (the real eval)
+  live     — real model, runs only with WAKU_LIVE_EVAL=1 plus the active
+             provider key, and tests MODEL+PROMPT behavior on dataset.jsonl
 """
 
 from __future__ import annotations
 
 import json
+import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from evals.helpers import HAS_KEY, ScriptedClient, make_waku, response, text_block, tool_block
+from evals.runner import prepare_case, snapshot_state
+from waku.config import load_settings
+from waku.ops.scoring import check_case
 
 DATASET = [
     json.loads(line)
     for line in (Path(__file__).resolve().parents[1] / "dataset.jsonl").read_text().splitlines()
     if line.strip()
 ]
+RUN_LIVE = HAS_KEY and os.getenv("WAKU_LIVE_EVAL", "").lower() in {"1", "true", "yes"}
 
 # ---------- offline tier: our plumbing is deterministic-testable without any model
 
@@ -102,26 +108,27 @@ def test_iteration_guardrail_stops_runaway_loop(tmp_path):
 # ---------- live tier: the actual model eval over the dataset
 
 
-@pytest.mark.skipif(not HAS_KEY, reason="live eval needs the active provider's API key")
+@pytest.mark.skipif(
+    not RUN_LIVE,
+    reason="live eval is explicit: set WAKU_LIVE_EVAL=1 and configure the active provider key",
+)
 @pytest.mark.parametrize("case", DATASET, ids=[c["id"] for c in DATASET])
 def test_dataset_case(case, tmp_path):
-    app = make_waku(tmp_path / "home")
-    if "setup_fact" in case:
-        app.memory.facts.add(case["setup_fact"]["subject"], case["setup_fact"]["content"])
-
-    result = app.respond(case["input"])
-    fired = [c["tool"] for c in result.tool_calls]
-
-    if case["expect_tool"] is None:
-        assert fired == [], f"expected no tools, model called {fired}"
-    else:
-        assert case["expect_tool"] in fired, f"expected {case['expect_tool']}, model called {fired}"
-        args = next(c["args"] for c in result.tool_calls if c["tool"] == case["expect_tool"])
-        for key, needle in case.get("expect_in_args", {}).items():
-            assert needle.lower() in str(args.get(key, "")).lower(), (
-                f"expected '{needle}' in args[{key}], got: {args.get(key)}"
-            )
-        # multi-tool cases (pokemon-team, worldcup-final): the loop must have
-        # actually looped, not satisfied one expectation and stopped
-        want = case.get("expect_min_tool_calls", 0)
-        assert len(fired) >= want, f"only {len(fired)} tool calls, wanted >= {want}"
+    settings = replace(
+        load_settings(),
+        home=tmp_path / "home",
+        apple_calendar=False,
+        apple_tools=False,
+    )
+    app = prepare_case(settings, case)
+    events = []
+    result = app.respond(
+        case["input"], observer=lambda kind, event: events.append({"type": kind, **event})
+    )
+    passed, reason = check_case(
+        case,
+        result.tool_calls,
+        state=snapshot_state(app),
+        controller=[event for event in events if event["type"] == "gate"],
+    )
+    assert passed, reason

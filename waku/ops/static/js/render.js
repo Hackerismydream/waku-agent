@@ -5,7 +5,12 @@
 const money = n => "$" + (n < 0.01 ? n.toFixed(4) : n.toFixed(2));
 const secs = ms => ms==null ? "无" : (ms/1000).toFixed(1)+" 秒";
 const gateDecision = v => ({skip:"跳过记忆", retrieve:"检索记忆"}[v] || v || "");
-const evalStatus = v => ({pass:"通过", fail:"失败", skip:"跳过"}[v] || v || "");
+const evalStatus = v => ({pass:"通过", fail:"失败", skip:"跳过", skipped:"跳过",
+  "not run":"未运行", open:"已开放", conditional:"有条件", closed:"已关闭"}[v] || v || "");
+const releaseStatus = r => !r ? "" : (r.release ||
+  (r.deterministic!=="pass" || r.judge==="fail" ? "closed" :
+    r.judge==="pass" ? "open" : "conditional"));
+const releaseClass = v => v==="open" ? "pass" : v==="closed" ? "fail" : "skip";
 const sourceLabel = v => ({dashboard:"网页", telegram:"Telegram", voice:"语音", cli:"终端", brief:"晨间简报"}[v] || v || "");
 
 const gateBadge = g => !g ? "" :

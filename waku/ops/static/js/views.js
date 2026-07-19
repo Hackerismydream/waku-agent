@@ -368,6 +368,7 @@ const VIEWS = {
   ops(d){
     const s = d.stats;
     const u = d.usage || {calls:0,total_in:0,total_out:0,total_cost:0,by_day:[],by_provider:[]};
+    const release = releaseStatus(d.eval_report);
     let h = `<div class="tiles">${[
         [money(u.total_cost),"累计费用","money"],[u.total_in.toLocaleString(),"累计输入 token",""],
         [u.total_out.toLocaleString(),"累计输出 token",""],[u.calls.toLocaleString(),"LLM 调用",""],
@@ -402,8 +403,9 @@ const VIEWS = {
     }
 
     h += `<h2>发布门 <span class="meta" style="font-weight:400">· 判断当前版本能否发布</span></h2>`;
-    h += `<div class="card"><span class="r">发布提示词、模型或检索策略改动前，运行 <code>make gate</code> 会执行两套评测：确定性测试必须 100% 通过，模型裁判也必须达到阈值。每次手动运行都会留下记录。</span></div>`;
+    h += `<div class="card"><span class="r">发布提示词、模型或检索策略改动前，运行 <code>make gate</code>：确定性测试必须 100% 通过；有可用密钥时，模型裁判也必须达到阈值。未运行模型裁判时只会得到“有条件”结果，不代表完整语义门禁通过。每次手动运行都会留下记录。</span></div>`;
     h += d.eval_report ? `<div class="card">
+        <span class="pill ${releaseClass(release)}">发布门 · ${evalStatus(release)}</span>
         <span class="pill ${d.eval_report.deterministic}">确定性测试 · ${evalStatus(d.eval_report.deterministic)}</span>
         <span class="pill ${d.eval_report.judge==="pass"?"pass":d.eval_report.judge==="fail"?"fail":"skip"}" style="margin-left:8px">模型裁判 · ${evalStatus(d.eval_report.judge)}</span>
         <div class="meta">上次运行：${esc(d.eval_report.ran_at)} · 使用 <code>make gate</code> 重新评测</div></div>`
@@ -412,8 +414,9 @@ const VIEWS = {
     if ((d.eval_history||[]).length){
       const cnt = s => s ? `${s.passed||0} 通过 · ${s.failed||0} 失败` : "无";
       h += `<h2>评测历史</h2>`;
-      h += table(["时间","确定性测试","模型裁判","数量"], d.eval_history.map(r =>
+      h += table(["时间","发布门","确定性测试","模型裁判","数量"], d.eval_history.map(r =>
         `<tr><td class="meta">${esc((r.ran_at||"").replace("T"," ").slice(0,19))}</td>
+         <td><span class="pill ${releaseClass(releaseStatus(r))}">${esc(evalStatus(releaseStatus(r)))}</span></td>
          <td><span class="pill ${r.deterministic}">${esc(evalStatus(r.deterministic))}</span></td>
          <td><span class="pill ${r.judge==="pass"?"pass":r.judge==="fail"?"fail":"skip"}">${esc(evalStatus(r.judge))}</span></td>
          <td class="meta">确定性 ${cnt(r.suites&&r.suites.deterministic)} · 裁判 ${cnt(r.suites&&r.suites.judge)}</td></tr>`));

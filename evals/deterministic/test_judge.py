@@ -1,4 +1,4 @@
-"""DETERMINISTIC EVAL — the K3-as-referee quality judge (waku.ops.judge).
+"""DETERMINISTIC EVAL — the optional final-reply judge (waku.ops.judge).
 
 We can't call a real model hermetically, so we stub the client with a canned
 JSON reply and pin the parse/clamp behavior + graceful failure. The point: a
@@ -66,3 +66,40 @@ def test_empty_reply_is_not_judged(monkeypatch):
 def test_bad_json_degrades_to_none(monkeypatch):
     _stub(monkeypatch, "the model rambled without any json")
     assert J.judge_reply("q", "a") is None
+
+
+def test_task_specific_criterion_is_sent_to_the_judge(monkeypatch):
+    seen = {}
+
+    class CapturingClient(_Client):
+        @property
+        def messages(self):
+            messages = self._Messages()
+
+            def create(**kwargs):
+                seen.update(kwargs)
+                return _Resp('{"score": 9, "reason": "meets criterion"}')
+
+            messages.create = create
+            return messages
+
+    monkeypatch.setattr(J, "get_client", lambda settings: CapturingClient(""))
+    J.judge_reply("draft it", "drafted locally", criterion="Must say it was not sent")
+
+    assert "Must say it was not sent" in seen["messages"][0]["content"]
+
+
+def test_explicit_judge_provider_prefers_its_specific_key(monkeypatch):
+    seen = {}
+
+    def client(settings):
+        seen["api_key"] = settings.api_key
+        return _Client('{"score": 8, "reason": "ok"}')
+
+    monkeypatch.setenv("WAKU_API_KEY", "generic-key")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "provider-key")
+    monkeypatch.setattr(J, "get_client", client)
+
+    J.judge_reply("q", "a", provider="kimi", model="kimi-k3")
+
+    assert seen["api_key"] == "provider-key"

@@ -53,3 +53,26 @@ def test_old_rows_without_meta_are_tolerated(tmp_path):
         "SELECT meta FROM chat_log WHERE role='assistant'"
     ).fetchone()
     assert row["meta"] is None
+
+
+def test_trace_records_prompt_hash_and_gate_usage(tmp_path):
+    events = []
+    gate = response(
+        [text_block('{"retrieve": false, "query": "", "reason": "math"}')],
+        input_tokens=7,
+        output_tokens=3,
+    )
+    turn = response([text_block("4")], input_tokens=11, output_tokens=1)
+    app = make_waku(tmp_path / "home", client=ScriptedClient([gate, turn]))
+
+    app.respond("what is 2+2?", observer=lambda kind, event: events.append((kind, event)))
+
+    prompt = next(event for kind, event in events if kind == "prompt")
+    assert len(prompt["sha256"]) == 64 and prompt["chars"] > 100
+    usage = [
+        json.loads(line) for line in (tmp_path / "home" / "usage.jsonl").read_text().splitlines()
+    ]
+    assert [(row["kind"], row["in"], row["out"]) for row in usage] == [
+        ("retrieval_gate", 7, 3),
+        ("loop", 11, 1),
+    ]
