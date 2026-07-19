@@ -122,6 +122,8 @@ def test_price_for_layers_model_over_provider():
     assert price_for("kimi", "kimi-k3") == MODEL_PRICING["kimi-k3"] == (3.0, 15.0)
     assert price_for("kimi", "kimi-k2.7") == (0.95, 4.0)
     assert price_for("kimi", "some-future-model") == PRICING["kimi"]
+    assert price_for("deepseek", "deepseek-v4-pro") == (0.435, 0.87)
+    assert price_for("deepseek", "deepseek-v4-flash") == (0.14, 0.28)
     assert price_for("openrouter", "whatever:free") == (0.0, 0.0)
 
     # Regression: within a provider, models diverge hugely — fable-5 is priced at

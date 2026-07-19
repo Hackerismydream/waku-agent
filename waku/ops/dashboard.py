@@ -420,6 +420,9 @@ MODEL_PRICING = {
     # Google Gemini — ai.google.dev pricing (standard <200k tier)
     "gemini-3.1-pro-preview": (2.0, 12.0),
     "gemini-3.5-flash": (1.5, 9.0),
+    # DeepSeek — api-docs.deepseek.com/quick_start/pricing
+    "deepseek-v4-pro": (0.435, 0.87),
+    "deepseek-v4-flash": (0.14, 0.28),
     # Moonshot Kimi — platform.kimi.ai (highspeed = 2x the standard k2.7 rate)
     "kimi-k3": (3.0, 15.0),
     "kimi-k2.7-code-highspeed": (1.9, 8.0),
